@@ -171,7 +171,6 @@ def render_provider_sidebar() -> ProviderConfig:
         mode = st.selectbox(
             "Extraction mode",
             [
-                "Private heuristic",
                 "Ollama local LLM",
                 "Gemini API",
                 "Claude API",
@@ -206,9 +205,7 @@ def render_provider_sidebar() -> ProviderConfig:
         api_key = os.getenv("OPENAI_API_KEY", "")
         api_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-        if mode == "Private heuristic":
-            st.info("No text leaves this Streamlit process. This is safest, but less smart.")
-        elif mode == "Ollama local LLM":
+        if mode == "Ollama local LLM":
             st.info("Text is sent to a local Ollama server only.")
             ollama_url = st.text_input("Ollama URL", value=ollama_url)
             ollama_model = st.text_input("Ollama model", value=ollama_model)
@@ -229,7 +226,11 @@ def render_provider_sidebar() -> ProviderConfig:
             api_key = st.text_input("API key", value=api_key, type="password")
 
         st.caption("Privacy is controlled by the extraction provider. Excerpt size only controls how much context is analyzed.")
-        fallback_to_heuristic = st.checkbox("Fallback to private heuristic on provider error", value=True)
+        fallback_to_heuristic = st.checkbox(
+            "Use private heuristic fallback if extraction provider fails",
+            value=True,
+            help="The heuristic fallback is low accuracy. It exists only so the demo can still run when a model is unavailable.",
+        )
 
         st.divider()
         st.metric("Approved facts", len(st.session_state.memory))
@@ -503,16 +504,16 @@ def render_privacy_tab() -> None:
     st.subheader("Privacy Model")
     st.write(
         "LoreLock is designed so the story memory and continuity rules can run locally. "
-        "The only part that may use an LLM is fact extraction, and the provider is explicit."
+        "Fact extraction uses the selected model provider. The low-accuracy heuristic is only a failure fallback."
     )
 
     st.markdown(
         """
-- **Private heuristic**: no network calls. Good for sensitive drafts, weaker extraction.
 - **Ollama local LLM**: sends selected text to `localhost`. Good privacy if the model is local, slower on weak hardware.
 - **Gemini API**: sends selected text to Google's Gemini API.
 - **Claude API**: sends selected text to Anthropic's Claude API.
 - **OpenAI-compatible API**: sends selected text to an external model endpoint. Better extraction, weaker privacy.
+- **Private heuristic fallback**: only used when the selected model fails and fallback is enabled. Low accuracy.
 - **Extraction depth**: controls the suggested excerpt length and how many facts the extractor is asked to return.
 - **Approved memory only**: extracted facts are suggestions until the writer approves them.
 - **Local saves**: saved memory goes to `data/working_memory.json`, which is gitignored.
@@ -525,9 +526,6 @@ def extract_facts(
     metadata: dict[str, Any],
     provider: ProviderConfig,
 ) -> tuple[list[dict[str, Any]], str]:
-    if provider.mode == "Private heuristic":
-        return heuristic_extract(text, metadata), "Used private heuristic extraction. No LLM call was made."
-
     try:
         if provider.mode == "Ollama local LLM":
             raw = call_ollama(text, metadata, provider)

@@ -7,7 +7,7 @@ Show a generic writing continuity agent that can build memory from arbitrary sto
 ## Demo Flow
 
 1. Run `streamlit run app.py`.
-2. Keep extraction mode on **Private heuristic** for the first privacy-safe demo.
+2. Use **Ollama local LLM** for a privacy-preserving demo, or use Gemini/Claude/OpenAI-compatible API if keys are configured.
 3. Use **Standard** extraction depth.
 4. Paste a short character sheet, outline, or chapter excerpt into **Ingest Memory**.
 5. Click **Extract candidate memory**.
@@ -15,6 +15,7 @@ Show a generic writing continuity agent that can build memory from arbitrary sto
 7. Open **Memory Graph** and show the structured memory.
 8. Open **Check Scene**, paste a scene with an intentional contradiction, and run the check.
 9. Explain that Ollama, Gemini, Claude, or an OpenAI-compatible API can improve extraction quality when privacy constraints allow it.
+10. Explain that the private heuristic is only a low-accuracy fallback if the selected model fails.
 
 ## Suggested Generic Test Memory
 
@@ -49,9 +50,11 @@ Expected warnings:
 ```text
 story text
   -> extraction provider
-      -> private heuristic
       -> optional local Ollama LLM
       -> optional OpenAI-compatible API
+      -> optional Gemini API
+      -> optional Claude API
+      -> private heuristic fallback on failure
   -> candidate facts
   -> human approval
   -> local memory graph
@@ -67,7 +70,7 @@ The fuller data model is documented in `docs/erd.md`. The key architectural idea
 - It stores only approved structured facts.
 - It checks only the memory relevant to the current scene.
 - It separates in-world story order from narrative chapter order.
-- It can run fully private without any external API.
+- It can run fully private through local Ollama.
 
 ## Extraction Depth Strategy
 

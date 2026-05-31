@@ -7,18 +7,18 @@ LoreLock is no longer seeded with a specific story. You paste or upload story ma
 ## What It Does
 
 1. Ingests arbitrary story text, outlines, character sheets, or lore notes.
-2. Extracts candidate facts such as relationships, reveals, status changes, possessions, events, world rules, and timeline markers.
+2. Uses a selected LLM provider to extract candidate facts such as relationships, reveals, status changes, possessions, events, world rules, and timeline markers.
 3. Lets the writer approve or reject those facts.
 4. Stores approved memory locally in the Streamlit session, with optional local JSON save.
 5. Checks draft scenes for possible continuity conflicts.
 
 ## AI Provider Options
 
-- **Private heuristic**: default mode. No network calls. Best privacy, weakest extraction.
 - **Ollama local LLM**: sends selected text to a local Ollama server, such as `llama3.2:3b`. Better extraction while keeping drafts local, but may be slow on weak hardware.
 - **Gemini API**: sends selected text to Google's Gemini API. Useful for stronger extraction when privacy constraints allow it.
 - **Claude API**: sends selected text to Anthropic's Claude API. Useful for stronger extraction when privacy constraints allow it.
 - **OpenAI-compatible API**: sends selected text to an external API endpoint. Better extraction, weaker privacy. Only use this deliberately.
+- **Private heuristic fallback**: only used if the selected provider fails and fallback is enabled. It is low accuracy and not the intended primary extractor.
 
 The continuity checker itself is deterministic and explainable. The LLM, if enabled, is used for extraction rather than final judgment.
 
