@@ -1,0 +1,10 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.env
+.streamlit/secrets.toml
+data/*.json
+exports/*.json
+.DS_Store
+Thumbs.db
