@@ -292,17 +292,27 @@ def render_live_textarea(
     height: int = 360,
 ) -> str:
     profile = excerpt_profile(provider)
+    state_key = f"{key}_value"
+    current_value = st.session_state.get(state_key, value)
+    if seed_token and seed_token != st.session_state.get(f"{key}_seed_token"):
+        current_value = value
+        st.session_state[state_key] = value
+        st.session_state[f"{key}_seed_token"] = seed_token
+
     result = LIVE_TEXTAREA(
         label=label,
-        value=value,
+        value=current_value,
         placeholder=placeholder,
         height=height,
         suggested_chars=int(profile["recommended_chars"]),
         seed_token=seed_token,
-        default=value,
+        default=current_value,
         key=key,
     )
-    return result if isinstance(result, str) else value
+    if isinstance(result, str):
+        st.session_state[state_key] = result
+        return result
+    return current_value
 
 
 def render_ingest_tab(provider: ProviderConfig) -> None:
