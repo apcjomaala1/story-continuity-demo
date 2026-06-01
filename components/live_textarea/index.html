@@ -104,6 +104,9 @@
       let initialized = false;
       let lastSeedToken = "";
       let sendTimer = null;
+      let readyTimer = null;
+      let readyAttempts = 0;
+      let hasRendered = false;
 
       function post(type, data) {
         window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
@@ -154,6 +157,16 @@
         sendTimer = window.setTimeout(sendValue, 180);
       }
 
+      function announceReady() {
+        post("streamlit:componentReady", { apiVersion: 1 });
+        setFrameHeight();
+
+        readyAttempts += 1;
+        if (!hasRendered && readyAttempts < 80) {
+          readyTimer = window.setTimeout(announceReady, 250);
+        }
+      }
+
       textarea.addEventListener("input", () => {
         updateCounter();
         scheduleSend();
@@ -166,6 +179,9 @@
         if (!event.data || event.data.type !== "streamlit:render") {
           return;
         }
+
+        hasRendered = true;
+        window.clearTimeout(readyTimer);
 
         const args = event.data.args || {};
         suggestedChars = Number(args.suggested_chars || suggestedChars || 4000);
@@ -186,8 +202,7 @@
         setFrameHeight();
       });
 
-      post("streamlit:componentReady", { apiVersion: 1 });
-      setFrameHeight();
+      announceReady();
     </script>
   </body>
 </html>
