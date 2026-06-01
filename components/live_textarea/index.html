@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
       :root {
-        color-scheme: light;
+        color-scheme: light dark;
         --ink: #17212b;
         --muted: #667085;
         --line: #d8dee8;
         --field: #ffffff;
+        --focus: #2563eb;
         --ok-bg: #f8fafc;
         --ok-line: #cbd5e1;
         --ok-fg: #334155;
@@ -19,6 +20,25 @@
         --over-bg: #fef2f2;
         --over-line: #dc2626;
         --over-fg: #991b1b;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #f8fafc;
+          --muted: #cbd5e1;
+          --line: #334155;
+          --field: #0f172a;
+          --focus: #60a5fa;
+          --ok-bg: #111827;
+          --ok-line: #334155;
+          --ok-fg: #e2e8f0;
+          --warn-bg: #451a03;
+          --warn-line: #f59e0b;
+          --warn-fg: #fde68a;
+          --over-bg: #450a0a;
+          --over-line: #ef4444;
+          --over-fg: #fecaca;
+        }
       }
 
       * {
@@ -56,8 +76,8 @@
       }
 
       textarea:focus {
-        border-color: #2563eb;
-        box-shadow: 0 0 0 1px #2563eb;
+        border-color: var(--focus);
+        box-shadow: 0 0 0 1px var(--focus);
       }
 
       .counter {
@@ -167,6 +187,34 @@
         }
       }
 
+      function applyTheme(theme) {
+        if (!theme) {
+          return;
+        }
+
+        const root = document.documentElement;
+        const base = String(theme.base || "").toLowerCase();
+        const isDark = base === "dark";
+        const text = theme.textColor || (base === "dark" ? "#f8fafc" : "#17212b");
+        const background = theme.secondaryBackgroundColor || theme.backgroundColor || (base === "dark" ? "#0f172a" : "#ffffff");
+        const border = isDark ? "#334155" : "#d8dee8";
+
+        root.style.colorScheme = isDark ? "dark" : "light";
+        root.style.setProperty("--ink", text);
+        root.style.setProperty("--field", background);
+        root.style.setProperty("--line", border);
+        root.style.setProperty("--focus", theme.primaryColor || (isDark ? "#60a5fa" : "#2563eb"));
+        root.style.setProperty("--ok-bg", background);
+        root.style.setProperty("--ok-line", border);
+        root.style.setProperty("--ok-fg", text);
+        root.style.setProperty("--warn-bg", isDark ? "#451a03" : "#fffbeb");
+        root.style.setProperty("--warn-line", isDark ? "#f59e0b" : "#d97706");
+        root.style.setProperty("--warn-fg", isDark ? "#fde68a" : "#92400e");
+        root.style.setProperty("--over-bg", isDark ? "#450a0a" : "#fef2f2");
+        root.style.setProperty("--over-line", isDark ? "#ef4444" : "#dc2626");
+        root.style.setProperty("--over-fg", isDark ? "#fecaca" : "#991b1b");
+      }
+
       textarea.addEventListener("input", () => {
         updateCounter();
         scheduleSend();
@@ -184,6 +232,7 @@
         window.clearTimeout(readyTimer);
 
         const args = event.data.args || {};
+        applyTheme(event.data.theme);
         suggestedChars = Number(args.suggested_chars || suggestedChars || 4000);
         label.textContent = args.label || "";
         textarea.placeholder = args.placeholder || "";
