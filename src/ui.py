@@ -204,26 +204,6 @@ def ensure_project_loaded(project_folder: Path) -> None:
     st.session_state.project_memory_saved_signature = ""
 
 
-def load_uploaded_project_memory(uploaded: Any) -> None:
-    token = f"{uploaded.name}:{getattr(uploaded, 'size', 0)}"
-    if st.session_state.get("uploaded_project_memory_token") == token:
-        return
-
-    try:
-        data = json.loads(uploaded.getvalue().decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        st.warning(f"Could not open project memory JSON: {summarize_exception(exc)}")
-        return
-
-    st.session_state.memory = normalize_facts(data if isinstance(data, list) else data.get("facts", []), {})
-    st.session_state.candidates = []
-    st.session_state.scene_facts = []
-    st.session_state.issues = []
-    st.session_state.uploaded_project_memory_token = token
-    st.session_state.project_memory_saved_signature = ""
-    st.success(f"Loaded {len(st.session_state.memory)} fact(s) from {uploaded.name}.")
-
-
 def autosave_project_state() -> None:
     project_folder = current_project_folder()
     try:
@@ -253,6 +233,24 @@ def autosave_project_state() -> None:
         st.sidebar.warning(f"Could not auto-save memory: {summarize_exception(exc)}")
     else:
         st.session_state.project_memory_saved_signature = signature
+
+
+def choose_project_folder_dialog(initial_dir: Path) -> str:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        selected = filedialog.askdirectory(
+            title="Choose LoreLock project folder",
+            initialdir=str(initial_dir if initial_dir.exists() else APP_DIR),
+            mustexist=False,
+        )
+    finally:
+        root.destroy()
+    return selected
 
 
 def render_model_selector(
@@ -302,16 +300,17 @@ def render_provider_sidebar() -> ProviderConfig:
         st.header("Project")
         project_folder = resolve_project_folder(st.session_state.project_folder_input)
         st.caption(f"Using `{project_folder}`")
-        uploaded_project = st.file_uploader(
-            "Open project memory JSON",
-            type=["json"],
-            key="project_memory_open",
-            help="Loads a LoreLock memory JSON into the current project. Autosave still writes to the project folder below.",
-        )
-        if uploaded_project is not None:
-            load_uploaded_project_memory(uploaded_project)
+        if st.button("Browse for project folder", use_container_width=True):
+            try:
+                selected_folder = choose_project_folder_dialog(project_folder)
+            except Exception as exc:
+                st.warning(f"Could not open folder picker: {summarize_exception(exc)}")
+            else:
+                if selected_folder:
+                    st.session_state.project_folder_input = selected_folder
+                    st.rerun()
 
-        with st.expander("Autosave folder", expanded=False):
+        with st.expander("Manual path", expanded=False):
             project_folder_text = st.text_input(
                 "Project folder path",
                 key="project_folder_input",
