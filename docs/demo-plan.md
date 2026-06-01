@@ -43,7 +43,7 @@ Expected warnings:
 - possible knowledge leak before the Chapter 8 reveal
 - lifecycle risk because Dain is dead after Chapter 4
 - world rule risk about old injuries and magic
-- relationship status conflict if wife/girlfriend facts both exist
+- relationship status conflict if wife/girlfriend facts both exist, while compatible roles like lover/boss on the same pair are allowed
 
 ## Agent Architecture
 

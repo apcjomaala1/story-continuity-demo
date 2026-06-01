@@ -24,6 +24,8 @@ The continuity checker itself is deterministic and explainable. The LLM, if enab
 
 Provider choices, endpoint URLs, model names, fallback preference, and API key fields are persisted locally in `data/provider_settings.json`. That file is gitignored.
 
+Provider output is passed through a canonicalization gate before it becomes approveable memory. Facts must be atomic, grounded in their evidence snippet, and normalized to controlled predicates; prose-shaped or unsupported claims are filtered instead of treated as checkable facts.
+
 ## Extraction Depth
 
 The app asks for an extraction depth, then suggests an excerpt length:
@@ -37,6 +39,8 @@ This applies to both memory ingestion and scene checking because both steps perf
 When pasted text exceeds the suggested length, the app can optionally split it into suggested-length parts before extraction. Splitting prefers sentence and newline boundaries and makes one provider/API call per part, so it is off by default.
 
 The main story text boxes use a small local component so character counts update while typing instead of relying on Streamlit's native apply cycle.
+
+Relationship facts are stored as distinct roles on the same subject/object edge. For example, `lover` and `boss` can both apply to the same character pair without being treated as a contradiction, while explicitly conflicting statuses such as `wife` versus `girlfriend` still produce a warning.
 
 ## Run
 

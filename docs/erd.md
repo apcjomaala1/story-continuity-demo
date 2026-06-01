@@ -192,13 +192,14 @@ Specialized edge for relationships between entities.
 | `project_id` | Parent project |
 | `from_entity_id` | Source entity |
 | `to_entity_id` | Target entity |
-| `relation_type` | `spouse`, `ex`, `ally`, `enemy`, `boss`, `friend`, etc. |
+| `relation_type` | `spouse`, `ex`, `ally`, `enemy`, `boss`, `friend`, etc. Multiple rows can connect the same pair when the relationship has more than one dimension. |
+| `relation_dimension` | Broad comparison lane such as `romantic`, `authority`, `family`, or `alliance` |
 | `value` | Optional value, such as `true`, `false`, `strained`, `secret` |
 | `valid_from_scene_id` | Relationship starts |
 | `valid_until_scene_id` | Relationship ends |
 | `fact_id` | Supporting fact |
 
-Why it matters: relationships change over time. This prevents "every character balloons the data" because the system stores only important edges, not every interaction.
+Why it matters: relationships change over time and can be multidimensional. A character can be another character's lover and boss at the same time without collapsing those roles into one ambiguous edge. This prevents "every character balloons the data" because the system stores only important edges, not every interaction.
 
 ### `knowledge_state`
 
@@ -334,4 +335,3 @@ The current Streamlit app uses a simplified version:
 | `continuity_issue` | Warning objects shown in Check Scene |
 
 The next serious implementation step is to move from session-state JSON into SQLite using this ERD.
-
