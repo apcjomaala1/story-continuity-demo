@@ -235,6 +235,24 @@ def autosave_project_state() -> None:
         st.session_state.project_memory_saved_signature = signature
 
 
+def choose_project_folder_dialog(initial_dir: Path) -> str:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        selected = filedialog.askdirectory(
+            title="Choose LoreLock project folder",
+            initialdir=str(initial_dir if initial_dir.exists() else APP_DIR),
+            mustexist=False,
+        )
+    finally:
+        root.destroy()
+    return selected
+
+
 def render_model_selector(
     label: str,
     *,
@@ -280,13 +298,26 @@ def render_model_selector(
 def render_provider_sidebar() -> ProviderConfig:
     with st.sidebar:
         st.header("Project")
-        project_folder_text = st.text_input(
-            "Project folder",
-            key="project_folder_input",
-            help="LoreLock auto-loads and auto-saves JSON files in this folder. Relative paths are resolved from the app folder.",
-        )
-        project_folder = resolve_project_folder(project_folder_text)
+        project_folder = resolve_project_folder(st.session_state.project_folder_input)
         st.caption(f"Using `{project_folder}`")
+        if st.button("Browse for project folder", use_container_width=True):
+            try:
+                selected_folder = choose_project_folder_dialog(project_folder)
+            except Exception as exc:
+                st.warning(f"Could not open folder picker: {summarize_exception(exc)}")
+            else:
+                if selected_folder:
+                    st.session_state.project_folder_input = selected_folder
+                    st.rerun()
+
+        with st.expander("Manual path", expanded=False):
+            project_folder_text = st.text_input(
+                "Project folder path",
+                key="project_folder_input",
+                help="LoreLock auto-loads and auto-saves JSON files in this folder. Relative paths are resolved from the app folder.",
+            )
+            project_folder = resolve_project_folder(project_folder_text)
+
         ensure_project_loaded(project_folder)
         ensure_provider_settings_state(project_provider_settings_file(project_folder))
         if st.session_state.get("project_notice"):
