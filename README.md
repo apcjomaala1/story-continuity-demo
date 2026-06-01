@@ -24,6 +24,8 @@ The continuity checker itself is deterministic and explainable. The LLM, if enab
 
 Provider choices, endpoint URLs, model names, fallback preference, and API key fields are persisted locally in `data/provider_settings.json`. That file is gitignored.
 
+Each provider section can refresh available models from the configured API and show them as a dropdown. If the provider cannot list models, the app falls back to a manual model-name field.
+
 Provider output is passed through a canonicalization gate before it becomes approveable memory. Facts must be atomic, grounded in their evidence snippet, and normalized to controlled predicates; prose-shaped or unsupported claims are filtered instead of treated as checkable facts.
 
 ## Extraction Depth

@@ -409,6 +409,48 @@ def save_provider_settings_to_disk(provider: ProviderConfig) -> None:
     PROVIDER_SETTINGS_FILE.write_text(content, encoding="utf-8")
 
 
+def render_model_selector(
+    label: str,
+    *,
+    setting_key: str,
+    cache_key: str,
+    fetch_models: Any,
+) -> None:
+    options_key = f"{cache_key}_model_options"
+    notice_key = f"{cache_key}_model_notice"
+
+    if st.button("Refresh model list", key=f"{cache_key}_refresh_models", use_container_width=True):
+        try:
+            options = fetch_models()
+            if not options:
+                raise RuntimeError("No models were returned by the provider.")
+        except Exception as exc:
+            st.session_state[options_key] = []
+            st.session_state[notice_key] = f"Model list unavailable: {summarize_exception(exc)}"
+        else:
+            st.session_state[options_key] = options
+            st.session_state[notice_key] = f"Fetched {len(options)} model(s)."
+            if not st.session_state.get(setting_key):
+                st.session_state[setting_key] = options[0]
+
+    options = list(st.session_state.get(options_key, []))
+    current = as_text(st.session_state.get(setting_key, ""))
+    if options:
+        choices = options if current in options or not current else [current, *options]
+        index = choices.index(current) if current in choices else 0
+        selected = st.selectbox(label, choices, index=index, key=f"{setting_key}_select")
+        st.session_state[setting_key] = selected
+    else:
+        st.text_input(label, key=setting_key)
+
+    notice = st.session_state.get(notice_key, "")
+    if notice:
+        if notice.startswith("Model list unavailable"):
+            st.warning(notice)
+        else:
+            st.caption(notice)
+
+
 def render_provider_sidebar() -> ProviderConfig:
     with st.sidebar:
         st.header("AI Provider")
@@ -432,22 +474,42 @@ def render_provider_sidebar() -> ProviderConfig:
         if mode == "Ollama local LLM":
             st.info("Text is sent to a local Ollama server only.")
             ollama_url = st.text_input("Ollama URL", key="provider_ollama_url")
-            ollama_model = st.text_input("Ollama model", key="provider_ollama_model")
+            render_model_selector(
+                "Ollama model",
+                setting_key="provider_ollama_model",
+                cache_key="ollama",
+                fetch_models=lambda: fetch_ollama_models(ollama_url),
+            )
         elif mode == "Gemini API":
             st.warning("Gemini mode sends selected story text to Google's Gemini API.")
             gemini_url = st.text_input("Gemini API base URL", key="provider_gemini_url")
-            gemini_model = st.text_input("Gemini model", key="provider_gemini_model")
             gemini_key = st.text_input("Gemini API key", type="password", key="provider_gemini_key")
+            render_model_selector(
+                "Gemini model",
+                setting_key="provider_gemini_model",
+                cache_key="gemini",
+                fetch_models=lambda: fetch_gemini_models(gemini_url, gemini_key),
+            )
         elif mode == "Claude API":
             st.warning("Claude mode sends selected story text to Anthropic's Claude API.")
             claude_url = st.text_input("Claude API base URL", key="provider_claude_url")
-            claude_model = st.text_input("Claude model", key="provider_claude_model")
             claude_key = st.text_input("Claude API key", type="password", key="provider_claude_key")
+            render_model_selector(
+                "Claude model",
+                setting_key="provider_claude_model",
+                cache_key="claude",
+                fetch_models=lambda: fetch_claude_models(claude_url, claude_key),
+            )
         else:
             st.warning("API mode sends selected story text to an external service.")
             api_url = st.text_input("API base URL", key="provider_api_url")
-            api_model = st.text_input("Model", key="provider_api_model")
             api_key = st.text_input("API key", type="password", key="provider_api_key")
+            render_model_selector(
+                "Model",
+                setting_key="provider_api_model",
+                cache_key="api",
+                fetch_models=lambda: fetch_openai_compatible_models(api_url, api_key),
+            )
 
         provider_values = current_provider_settings()
         ollama_url = provider_values["ollama_url"]
@@ -1010,6 +1072,95 @@ def provider_source_label(provider: ProviderConfig) -> str:
     return f"api:{provider.api_model}"
 
 
+def fetch_ollama_models(base_url: str) -> list[str]:
+    payload = get_json(f"{base_url.rstrip('/')}/api/tags")
+    return extract_model_names(payload, keys=("name", "model"))
+
+
+def fetch_gemini_models(base_url: str, api_key: str) -> list[str]:
+    if not api_key:
+        raise ValueError("Gemini API key is missing")
+
+    payload = get_json(f"{base_url.rstrip('/')}/models", {"x-goog-api-key": api_key})
+    return extract_gemini_model_names(payload)
+
+
+def fetch_claude_models(base_url: str, api_key: str) -> list[str]:
+    if not api_key:
+        raise ValueError("Claude API key is missing")
+
+    payload = get_json(
+        f"{base_url.rstrip('/')}/models",
+        {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    return extract_model_names(payload, containers=("data", "models"), keys=("id", "name", "model"))
+
+
+def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    payload = get_json(f"{base_url.rstrip('/')}/models", headers)
+    return extract_model_names(payload, containers=("data", "models"), keys=("id", "name", "model"))
+
+
+def extract_gemini_model_names(payload: dict[str, Any]) -> list[str]:
+    models = []
+    for item in payload.get("models", []) if isinstance(payload, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        methods = item.get("supportedGenerationMethods", [])
+        if methods and "generateContent" not in methods:
+            continue
+        name = as_text(item.get("name"))
+        if name.startswith("models/"):
+            name = name.split("/", 1)[1]
+        if name:
+            models.append(name)
+    return sorted_unique(models)
+
+
+def extract_model_names(
+    payload: dict[str, Any],
+    *,
+    containers: tuple[str, ...] = ("models", "data"),
+    keys: tuple[str, ...] = ("id", "name", "model"),
+) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+
+    names = []
+    for container in containers:
+        items = payload.get(container, [])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, str):
+                names.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            for key in keys:
+                name = as_text(item.get(key))
+                if name:
+                    names.append(name)
+                    break
+    return sorted_unique(names)
+
+
+def sorted_unique(values: list[str]) -> list[str]:
+    seen = set()
+    unique = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(normalized)
+    return sorted(unique, key=str.lower)
+
+
 def summarize_exception(exc: Exception) -> str:
     message = str(exc).strip()
     if len(message) > 180:
@@ -1177,6 +1328,28 @@ def post_json(url: str, body: dict[str, Any], headers: dict[str, str] | None = N
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
+            response_text = response.read().decode("utf-8", errors="replace")
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError as exc:
+                details = truncate_debug_text(response_text.strip(), 4000) if response_text else "<empty response body>"
+                raise RuntimeError(f"Provider returned non-JSON HTTP response: {details}") from exc
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        details = truncate_debug_text(body.strip(), 4000) if body else "<empty response body>"
+        raise RuntimeError(f"HTTP {exc.code} {exc.reason}: {details}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", **(headers or {})},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
             response_text = response.read().decode("utf-8", errors="replace")
             try:
                 return json.loads(response_text)
