@@ -13,6 +13,7 @@ from src.constants import (
     MEMORY_FILE,
     PROVIDER_BASE_URL_KEYS,
     PROVIDER_MODES,
+    ContinuityIssue,
     ProviderConfig,
 )
 from src.continuity import check_continuity
@@ -47,15 +48,13 @@ def main() -> None:
     st.caption("A generic story continuity agent with private-first memory extraction.")
 
     provider = render_provider_sidebar()
-    tabs = st.tabs(["Ingest Memory", "Memory Graph", "Check Scene", "Privacy"])
+    tabs = st.tabs(["Scene Review", "Memory Graph", "Privacy"])
 
     with tabs[0]:
-        render_ingest_tab(provider)
+        render_scene_review_tab(provider)
     with tabs[1]:
         render_memory_tab()
     with tabs[2]:
-        render_check_tab(provider)
-    with tabs[3]:
         render_privacy_tab()
 
 
@@ -316,16 +315,17 @@ def render_chunking_option(key: str, text: str, provider: ProviderConfig) -> boo
 # ---------------------------------------------------------------------------
 
 
-def render_ingest_tab(provider: ProviderConfig) -> None:
-    st.subheader("Build Story Memory")
+def render_scene_review_tab(provider: ProviderConfig) -> None:
+    st.subheader("Scene Review")
     st.write(
         "Paste a chapter, scene, outline, character sheet, or lore note. "
-        "The agent extracts candidate continuity facts, then you approve what becomes canon."
+        "LoreLock extracts candidate facts, checks them against approved memory, "
+        "and lets you approve what should become canon."
     )
 
     meta_col, text_col = st.columns([0.34, 0.66], gap="large")
     with meta_col:
-        metadata = render_metadata_form("ingest", default_source="story note")
+        metadata = render_metadata_form("review", default_source="draft scene")
         uploaded = st.file_uploader("Optional text file", type=["txt", "md"])
 
     uploaded_text = ""
@@ -337,28 +337,53 @@ def render_ingest_tab(provider: ProviderConfig) -> None:
 
     with text_col:
         text = render_live_textarea(
-            "Source text",
+            "Scene or source text",
             value=uploaded_text,
-            placeholder="Paste story material here.",
-            key="source_text_live",
+            placeholder="Paste the story material you want to review.",
+            key="review_text_live",
             provider=provider,
             seed_token=seed_token,
         )
-        split_over_limit = render_chunking_option("source_text_live", text, provider)
+        split_over_limit = render_chunking_option("review_text_live", text, provider)
 
-    if st.button("Extract candidate memory", type="primary", use_container_width=True):
+    if st.button("Extract, check, and stage facts", type="primary", use_container_width=True):
         if not text.strip():
             st.error("Paste or upload story text first.")
         else:
-            with st.spinner("Extracting candidate facts..."):
-                facts, notice, debug = extract_facts_for_text(text, metadata, provider, split_over_limit=split_over_limit)
+            with st.spinner("Extracting facts and checking continuity..."):
+                facts, issues, notice, debug = review_text_against_memory(
+                    text,
+                    metadata,
+                    provider,
+                    st.session_state.memory,
+                    split_over_limit=split_over_limit,
+                )
             st.session_state.candidates = facts
+            st.session_state.scene_facts = facts
+            st.session_state.issues = issues
             st.session_state.provider_notice = notice
             st.session_state.provider_debug = debug
 
-    render_provider_feedback("ingest")
+    render_provider_feedback("review")
 
-    render_candidate_facts()
+    warning_col, candidate_col = st.columns([0.52, 0.48], gap="large")
+    with warning_col:
+        render_continuity_warnings()
+    with candidate_col:
+        render_candidate_facts()
+
+
+def review_text_against_memory(
+    text: str,
+    metadata: dict[str, Any],
+    provider: ProviderConfig,
+    memory: list[dict[str, Any]],
+    *,
+    split_over_limit: bool,
+) -> tuple[list[dict[str, Any]], list[ContinuityIssue], str, str]:
+    facts, notice, debug = extract_facts_for_text(text, metadata, provider, split_over_limit=split_over_limit)
+    issues = check_continuity(text, facts, memory) if memory else []
+    return facts, issues, notice, debug
 
 
 def render_metadata_form(prefix: str, default_source: str) -> dict[str, Any]:
@@ -420,7 +445,7 @@ def render_memory_tab() -> None:
     memory = st.session_state.memory
 
     if not memory:
-        st.info("Memory is empty. Ingest story text first or import JSON below.")
+        st.info("Memory is empty. Review story text first or import JSON below.")
     else:
         rows = [
             {
@@ -479,71 +504,20 @@ def render_memory_tab() -> None:
             st.error(f"Invalid JSON: {exc}")
 
 
-def render_check_tab(provider: ProviderConfig) -> None:
-    st.subheader("Check a New Scene")
-    st.write(
-        "Paste a draft scene. The agent extracts temporary scene facts, scopes relevant memory, "
-        "and flags possible continuity issues."
-    )
-
-    meta_col, text_col = st.columns([0.34, 0.66], gap="large")
-    with meta_col:
-        metadata = render_metadata_form("check", default_source="draft scene")
-
-    with text_col:
-        scene_text = render_live_textarea(
-            "Draft scene",
-            placeholder="Paste the scene you want to check.",
-            value="",
-            key="scene_text_live",
-            provider=provider,
-        )
-        split_over_limit = render_chunking_option("scene_text_live", scene_text, provider)
-
-    if st.button("Extract and check scene", type="primary", use_container_width=True):
-        if not scene_text.strip():
-            st.error("Paste a scene first.")
-        elif not st.session_state.memory:
-            st.warning("Memory is empty. You can still extract scene facts, but there is nothing to compare against.")
-            facts, notice, debug = extract_facts_for_text(scene_text, metadata, provider, split_over_limit=split_over_limit)
-            st.session_state.scene_facts = facts
-            st.session_state.issues = []
-            st.session_state.provider_notice = notice
-            st.session_state.provider_debug = debug
-        else:
-            with st.spinner("Extracting scene facts and checking continuity..."):
-                facts, notice, debug = extract_facts_for_text(scene_text, metadata, provider, split_over_limit=split_over_limit)
-                issues = check_continuity(scene_text, facts, st.session_state.memory)
-            st.session_state.scene_facts = facts
-            st.session_state.issues = issues
-            st.session_state.provider_notice = notice
-            st.session_state.provider_debug = debug
-
-    render_provider_feedback("scene")
-
-    col_a, col_b = st.columns([0.48, 0.52], gap="large")
-    with col_a:
-        st.markdown("#### Extracted Scene Facts")
-        if st.session_state.scene_facts:
-            for fact in st.session_state.scene_facts:
-                with st.container(border=True):
-                    st.markdown(f"**{fact_label(fact)}**")
-                    st.caption(f"Evidence: {fact.get('evidence', '')}")
-        else:
-            st.info("No scene facts extracted yet.")
-
-    with col_b:
-        st.markdown(f"#### Continuity Warnings: {len(st.session_state.issues)}")
-        if st.session_state.issues:
-            severity_rank = {"high": 0, "medium": 1, "low": 2}
-            for issue in sorted(st.session_state.issues, key=lambda item: severity_rank[item.severity]):
-                with st.container(border=True):
-                    st.markdown(f"**{issue.category}** - `{issue.severity.upper()}`")
-                    st.write(issue.message)
-                    st.caption(f"Evidence: {issue.evidence}")
-                    st.caption(f"Next: {issue.suggestion}")
-        else:
-            st.info("No warnings yet.")
+def render_continuity_warnings() -> None:
+    st.markdown(f"#### Continuity Warnings: {len(st.session_state.issues)}")
+    if st.session_state.issues:
+        severity_rank = {"high": 0, "medium": 1, "low": 2}
+        for issue in sorted(st.session_state.issues, key=lambda item: severity_rank[item.severity]):
+            with st.container(border=True):
+                st.markdown(f"**{issue.category}** - `{issue.severity.upper()}`")
+                st.write(issue.message)
+                st.caption(f"Evidence: {issue.evidence}")
+                st.caption(f"Next: {issue.suggestion}")
+    elif st.session_state.scene_facts and not st.session_state.memory:
+        st.info("No approved memory yet, so this pass only extracted candidate facts.")
+    else:
+        st.info("No warnings yet.")
 
 
 def render_privacy_tab() -> None:
