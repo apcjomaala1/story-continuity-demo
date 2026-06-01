@@ -188,6 +188,7 @@ def ensure_state() -> None:
     st.session_state.setdefault("scene_facts", [])
     st.session_state.setdefault("issues", [])
     st.session_state.setdefault("provider_notice", "")
+    st.session_state.setdefault("provider_debug", "")
 
 
 def render_provider_sidebar() -> ProviderConfig:
@@ -349,12 +350,12 @@ def render_ingest_tab(provider: ProviderConfig) -> None:
             st.error("Paste or upload story text first.")
         else:
             with st.spinner("Extracting candidate facts..."):
-                facts, notice = extract_facts(text, metadata, provider)
+                facts, notice, debug = extract_facts(text, metadata, provider)
             st.session_state.candidates = facts
             st.session_state.provider_notice = notice
+            st.session_state.provider_debug = debug
 
-    if st.session_state.provider_notice:
-        st.caption(st.session_state.provider_notice)
+    render_provider_feedback("ingest")
 
     render_candidate_facts()
 
@@ -500,20 +501,21 @@ def render_check_tab(provider: ProviderConfig) -> None:
             st.error("Paste a scene first.")
         elif not st.session_state.memory:
             st.warning("Memory is empty. You can still extract scene facts, but there is nothing to compare against.")
-            facts, notice = extract_facts(scene_text, metadata, provider)
+            facts, notice, debug = extract_facts(scene_text, metadata, provider)
             st.session_state.scene_facts = facts
             st.session_state.issues = []
             st.session_state.provider_notice = notice
+            st.session_state.provider_debug = debug
         else:
             with st.spinner("Extracting scene facts and checking continuity..."):
-                facts, notice = extract_facts(scene_text, metadata, provider)
+                facts, notice, debug = extract_facts(scene_text, metadata, provider)
                 issues = check_continuity(scene_text, facts, st.session_state.memory)
             st.session_state.scene_facts = facts
             st.session_state.issues = issues
             st.session_state.provider_notice = notice
+            st.session_state.provider_debug = debug
 
-    if st.session_state.provider_notice:
-        st.caption(st.session_state.provider_notice)
+    render_provider_feedback("scene")
 
     col_a, col_b = st.columns([0.48, 0.52], gap="large")
     with col_a:
@@ -561,33 +563,126 @@ def render_privacy_tab() -> None:
     )
 
 
+def render_provider_feedback(key_prefix: str) -> None:
+    notice = st.session_state.get("provider_notice", "")
+    debug = st.session_state.get("provider_debug", "")
+    if notice:
+        if debug:
+            st.warning(notice)
+        else:
+            st.caption(notice)
+    if debug:
+        with st.expander("Provider debug dump", expanded=True):
+            st.text_area(
+                "Copy this diagnostic",
+                value=debug,
+                height=280,
+                key=f"{key_prefix}_provider_debug_dump",
+            )
+
+
 def extract_facts(
     text: str,
     metadata: dict[str, Any],
     provider: ProviderConfig,
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[list[dict[str, Any]], str, str]:
+    raw = ""
+    source = provider_source_label(provider)
     try:
         if provider.mode == "Ollama local LLM":
             raw = call_ollama(text, metadata, provider)
-            source = f"ollama:{provider.ollama_model}"
         elif provider.mode == "Gemini API":
             raw = call_gemini(text, metadata, provider)
-            source = f"gemini:{provider.gemini_model}"
         elif provider.mode == "Claude API":
             raw = call_claude(text, metadata, provider)
-            source = f"claude:{provider.claude_model}"
         else:
             raw = call_openai_compatible(text, metadata, provider)
-            source = f"api:{provider.api_model}"
 
         payload = parse_json_object(raw)
         facts = normalize_facts(payload.get("facts", []), metadata, extraction_source=source)
-        return facts, f"Used {source} for extraction."
+        return facts, f"Used {source} for extraction.", ""
     except Exception as exc:
+        debug = build_provider_debug(exc, provider, metadata, text, raw)
         if not provider.fallback_to_heuristic:
-            raise
+            return [], f"Provider failed ({summarize_exception(exc)}). No fallback was used.", debug
         facts = heuristic_extract(text, metadata)
-        return facts, f"Provider failed ({exc}). Fell back to private heuristic extraction."
+        return facts, f"Provider failed ({summarize_exception(exc)}). Fell back to private heuristic extraction.", debug
+
+
+def provider_source_label(provider: ProviderConfig) -> str:
+    if provider.mode == "Ollama local LLM":
+        return f"ollama:{provider.ollama_model}"
+    if provider.mode == "Gemini API":
+        return f"gemini:{provider.gemini_model}"
+    if provider.mode == "Claude API":
+        return f"claude:{provider.claude_model}"
+    return f"api:{provider.api_model}"
+
+
+def summarize_exception(exc: Exception) -> str:
+    message = str(exc).strip()
+    if len(message) > 180:
+        message = message[:177].rstrip() + "..."
+    return f"{type(exc).__name__}: {message}"
+
+
+def build_provider_debug(
+    exc: Exception,
+    provider: ProviderConfig,
+    metadata: dict[str, Any],
+    text: str,
+    raw: str,
+) -> str:
+    profile = excerpt_profile(provider)
+    lines = [
+        "Provider debug dump",
+        f"provider_mode: {provider.mode}",
+        f"provider_model: {provider_source_label(provider)}",
+        f"extraction_depth: {profile['label']}",
+        f"input_chars: {len(text)}",
+        f"metadata: {json.dumps(metadata, ensure_ascii=False)}",
+        f"exception_type: {type(exc).__name__}",
+        f"exception_message: {str(exc)}",
+    ]
+
+    if isinstance(exc, json.JSONDecodeError):
+        lines.extend(
+            [
+                f"json_error_line: {exc.lineno}",
+                f"json_error_column: {exc.colno}",
+                f"json_error_position: {exc.pos}",
+                "json_error_context:",
+                json_error_context(exc.doc, exc.pos),
+            ]
+        )
+
+    if raw:
+        lines.extend(
+            [
+                f"raw_response_chars: {len(raw)}",
+                "raw_response:",
+                truncate_debug_text(raw, 12000),
+            ]
+        )
+    else:
+        lines.append("raw_response: <none captured; provider call failed before model text was returned>")
+
+    return "\n".join(lines)
+
+
+def json_error_context(document: str, position: int, radius: int = 400) -> str:
+    start = max(0, position - radius)
+    end = min(len(document), position + radius)
+    excerpt = document[start:end]
+    pointer = " " * max(0, position - start) + "^"
+    return f"{excerpt}\n{pointer}"
+
+
+def truncate_debug_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    omitted = len(value) - limit
+    return f"{value[:limit]}\n\n... <truncated {omitted} chars>"
 
 
 def call_ollama(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
@@ -691,7 +786,16 @@ def post_json(url: str, body: dict[str, Any], headers: dict[str, str] | None = N
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
-            return json.loads(response.read().decode("utf-8"))
+            response_text = response.read().decode("utf-8", errors="replace")
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError as exc:
+                details = truncate_debug_text(response_text.strip(), 4000) if response_text else "<empty response body>"
+                raise RuntimeError(f"Provider returned non-JSON HTTP response: {details}") from exc
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        details = truncate_debug_text(body.strip(), 4000) if body else "<empty response body>"
+        raise RuntimeError(f"HTTP {exc.code} {exc.reason}: {details}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(str(exc)) from exc
 
