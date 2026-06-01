@@ -267,8 +267,8 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
                 "type": "relationship | knowledge | status | possession | location | event | world_rule | trait | ability | timeline",
                 "subject": "entity",
                 "predicate": "canonical_snake_case",
-                "object": "target/place/item/topic/info or empty",
-                "value": "short state/attribute/role or empty",
+                "object": "target/place/item/topic/info; empty for simple attributes",
+                "value": "short state/attribute/role; empty for simple targets",
                 "relation_type": "relationship role only",
                 "relation_types": ["optional multiple relationship roles"],
                 "known_by": ["explicit knowers only"],
@@ -288,11 +288,19 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
         "trait hair_color/height/build; ability ability/skill/limitation; possession owns/carries/lost/gained item; "
         "location current_location/residence/origin; event concrete_action target; world_rule rule/restriction topic; "
         "timeline before/after/during/same_time_as/story_order.\n"
+        "- Slot discipline is strict. For status, trait, and ability facts, put the attribute result in value and leave object empty. "
+        "Examples: status affiliation value='House Ardent'; status role value='student'; trait hair_color value='black'.\n"
+        "- For location facts, put the place in object and leave value empty. Use location origin for birthplace/hometown/origin places, "
+        "not status origin. Example: location origin object='Bracken Parish'.\n"
+        "- For possession facts, put the item in object and leave value empty. Different owned items are separate facts, not conflicts.\n"
         "- Use object for targets/items/places/topics/info; use value for short states/attributes/roles. "
         "Use both only when the shape needs both, such as relationship or family_business_involvement.\n"
         "- Knowledge subject is the explicit knower/learner, not necessarily the speaker. known_by lists only explicit knowers.\n\n"
         "Examples:\n"
         "- 'Reika is 26' -> status Reika age = 26.\n"
+        "- 'Seraphine belongs to House Ardent' -> status Seraphine affiliation value=House Ardent, object empty.\n"
+        "- 'Liora is from Bracken Parish' -> location Liora origin object=Bracken Parish, value empty.\n"
+        "- 'Liora owns an iron key' -> possession Liora owns object=iron key, value empty.\n"
         "- 'Sena was a student when she met Kaito and was not involved in the family business' -> "
         "status Sena role=student; event Sena met Kaito; status Sena family_business_involvement family business=not involved.\n"
         "- 'A is B's lover and boss' -> one relationship fact with relation_types ['lover','boss'] or two relationship facts.\n\n"
