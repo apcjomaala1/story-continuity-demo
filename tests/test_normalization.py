@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app
+from src.facts import normalize_facts
 
 
 def metadata() -> dict[str, object]:
@@ -24,7 +24,7 @@ def test_uncheckable_knowledge_blob_is_rejected() -> None:
         }
     ]
 
-    assert app.normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash") == []
+    assert normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash") == []
 
 
 def test_compound_timeline_fact_decomposes_to_atomic_facts() -> None:
@@ -41,7 +41,7 @@ def test_compound_timeline_fact_decomposes_to_atomic_facts() -> None:
         }
     ]
 
-    facts = app.normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash")
+    facts = normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash")
 
     assert [(fact["type"], fact["subject"], fact["predicate"], fact["object"], fact["value"]) for fact in facts] == [
         ("status", "Sena Hikawa", "role", "", "student"),
@@ -64,7 +64,7 @@ def test_canonical_knowledge_fact_is_kept() -> None:
         }
     ]
 
-    facts = app.normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash")
+    facts = normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash")
 
     assert len(facts) == 1
     assert facts[0]["type"] == "knowledge"

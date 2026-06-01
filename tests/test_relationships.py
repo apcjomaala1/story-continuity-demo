@@ -3,7 +3,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app
+from src.continuity import check_continuity
+from src.extraction import heuristic_extract
+from src.facts import normalize_facts
 
 
 def metadata() -> dict[str, object]:
@@ -17,7 +19,7 @@ def relationship_facts(facts: list[dict[str, object]]) -> list[dict[str, object]
 def test_compound_relationship_roles_are_split() -> None:
     text = "Mara is Dain's lover and boss."
 
-    facts = relationship_facts(app.heuristic_extract(text, metadata()))
+    facts = relationship_facts(heuristic_extract(text, metadata()))
 
     assert {
         (fact["subject"], fact["object"], fact["relation_type"], fact["relation_dimension"])
@@ -29,22 +31,22 @@ def test_compound_relationship_roles_are_split() -> None:
 
 
 def test_relationship_dimensions_do_not_conflict() -> None:
-    memory = app.normalize_facts(
+    memory = normalize_facts(
         [{"type": "relationship", "subject": "Mara", "predicate": "relationship_to", "object": "Dain", "value": "lover"}],
         metadata(),
     )
-    scene = app.normalize_facts(
+    scene = normalize_facts(
         [{"type": "relationship", "subject": "Mara", "predicate": "relationship_to", "object": "Dain", "value": "boss"}],
         metadata(),
     )
 
-    issues = app.check_continuity("Mara is Dain's boss.", scene, memory)
+    issues = check_continuity("Mara is Dain's boss.", scene, memory)
 
     assert not [issue for issue in issues if issue.category == "Relationship conflict"]
 
 
 def test_longer_relationship_roles_do_not_create_nested_roles() -> None:
-    facts = app.normalize_facts(
+    facts = normalize_facts(
         [
             {
                 "type": "relationship",
@@ -61,7 +63,7 @@ def test_longer_relationship_roles_do_not_create_nested_roles() -> None:
 
 
 def test_relationship_value_is_not_assumed_to_be_a_role() -> None:
-    facts = app.normalize_facts(
+    facts = normalize_facts(
         [
             {
                 "type": "relationship",
@@ -79,15 +81,15 @@ def test_relationship_value_is_not_assumed_to_be_a_role() -> None:
 
 
 def test_conflicting_relationship_status_still_warns() -> None:
-    memory = app.normalize_facts(
+    memory = normalize_facts(
         [{"type": "relationship", "subject": "Mara", "predicate": "relationship_to", "object": "Dain", "value": "wife"}],
         metadata(),
     )
-    scene = app.normalize_facts(
+    scene = normalize_facts(
         [{"type": "relationship", "subject": "Mara", "predicate": "relationship_to", "object": "Dain", "value": "girlfriend"}],
         metadata(),
     )
 
-    issues = app.check_continuity("Mara introduced herself as Dain's girlfriend.", scene, memory)
+    issues = check_continuity("Mara introduced herself as Dain's girlfriend.", scene, memory)
 
     assert any(issue.category == "Relationship conflict" for issue in issues)

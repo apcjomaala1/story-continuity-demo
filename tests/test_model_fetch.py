@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app
+from src.providers import extract_gemini_model_names, extract_model_names
 
 
 def test_extract_ollama_model_names() -> None:
@@ -14,7 +14,7 @@ def test_extract_ollama_model_names() -> None:
         ]
     }
 
-    assert app.extract_model_names(payload, keys=("name", "model")) == ["llama3.2:3b", "mistral:latest"]
+    assert extract_model_names(payload, keys=("name", "model")) == ["llama3.2:3b", "mistral:latest"]
 
 
 def test_extract_openai_compatible_model_names() -> None:
@@ -25,7 +25,7 @@ def test_extract_openai_compatible_model_names() -> None:
         ]
     }
 
-    assert app.extract_model_names(payload, containers=("data",), keys=("id",)) == ["gpt-4o", "gpt-4o-mini"]
+    assert extract_model_names(payload, containers=("data",), keys=("id",)) == ["gpt-4o", "gpt-4o-mini"]
 
 
 def test_extract_gemini_model_names_filters_generation_models() -> None:
@@ -36,4 +36,4 @@ def test_extract_gemini_model_names_filters_generation_models() -> None:
         ]
     }
 
-    assert app.extract_gemini_model_names(payload) == ["gemini-2.5-flash"]
+    assert extract_gemini_model_names(payload) == ["gemini-2.5-flash"]
