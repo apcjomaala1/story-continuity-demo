@@ -226,11 +226,13 @@ def extraction_system_prompt(provider: ProviderConfig) -> str:
         "You extract structured continuity facts for fiction editing. "
         "Return only JSON with a top-level key named facts. "
         "Do not invent facts. Keep each fact grounded in the provided text. "
-        "Every fact must be atomic and directly checkable: one subject, one predicate, "
-        "and one object or value. Split compound claims into separate facts. "
-        "Use short evidence snippets. Prefer facts that matter for continuity: "
-        "relationships, status changes, knowledge/reveals, possessions, locations, "
-        "world rules, timeline markers, abilities, and traits. "
+        "Extract only atomic, directly checkable continuity claims. "
+        "Each fact must contain one subject, one canonical predicate, and only the object/value slots required by its canonical shape. "
+        "Split compound statements into separate facts; omit claims that cannot be made atomic. "
+        "Predicates must be canonical snake_case names for the actual relation, attribute, action, or rule. "
+        "Never use wrapper predicates such as has_*, have_*, is_*, was_*, or became_*. "
+        "Prefer durable continuity facts: relationships, statuses, knowledge/reveals, possessions, locations, "
+        "world rules, timeline ordering, abilities, and traits. "
         f"Extraction depth: {profile['label']}. {profile['guidance']} "
         f"Return at most {profile['max_facts']} facts."
     )
@@ -241,11 +243,11 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
     schema = {
         "facts": [
             {
-                "type": "relationship | knowledge | status | possession | location | event | world_rule | trait | ability | timeline | character",
+                "type": "relationship | knowledge | status | possession | location | event | world_rule | trait | ability | timeline",
                 "subject": "entity name",
-                "predicate": "short relation or action",
-                "object": "entity or target, optional",
-                "value": "status/value, optional",
+                "predicate": "canonical snake_case predicate, never has_* or is_*",
+                "object": "target entity/topic/event/place/item/known information; empty for value-only attributes",
+                "value": "short state, attribute value, or relationship role; empty for target-only actions",
                 "relation_type": "for relationship facts only, e.g. lover, boss, friend, enemy",
                 "relation_types": ["optional list when one subject-object pair has multiple simultaneous relationship roles"],
                 "known_by": ["optional character names"],
@@ -260,14 +262,50 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
         f"Extraction guidance: {profile['guidance']}\n"
         f"Maximum facts: {profile['max_facts']}\n\n"
         "Atomicity rules:\n"
-        "- One fact must express one checkable claim only.\n"
-        "- Do not put extra claims in value. Values should be short states like 'student', 'dead', 'not involved'.\n"
-        "- Use timeline only for explicit ordering facts such as 'A happens before B'. Do not use timeline for mixed biography/status claims.\n"
-        "- Example: 'Sena was a student when she met Kaito and was not involved in the family business' should become separate facts: "
-        "status Sena role=student; event Sena met Kaito; status Sena family_business_involvement family business=not involved.\n\n"
-        "For multidimensional relationships, keep each role distinct. If A is B's lover and boss, "
-        "emit either two relationship facts for the same subject/object or one fact with relation_types "
-        "['lover', 'boss']; do not collapse that into one vague relationship value.\n\n"
+        "- One fact must express one checkable claim only. If a sentence contains when, while, because, but, and, or multiple facts, split it.\n"
+        "- Do not put extra claims in predicate, object, or value. Evidence can contain the quote; fields must stay short and canonical.\n"
+        "- If a claim cannot be represented without a long phrase, causal clause, or mixed claim, skip it.\n"
+        "- Do not extract generic existence, mention, mood, narration, or scene-summary facts unless they create a concrete continuity constraint.\n"
+        "- Do not infer unstated facts, motives, relationships, ages, identities, or knowledge.\n\n"
+        "Field discipline:\n"
+        "- Use object for a second entity, target, location, possessed item, governed topic, or comparison event.\n"
+        "- Use value for a short state or attribute value. Use both object and value only for canonical shapes that need both, such as relationships or family_business_involvement.\n"
+        "- Knowledge facts represent who knows or learns information, not who speaks. For reveals, subject is the explicit listener/learner; use an event fact for the revealer if needed.\n"
+        "- Use known_by only for characters explicitly shown to know the fact. Leave it empty for narrator/world facts.\n"
+        "- Confidence should be high only for directly stated facts; use lower confidence for close paraphrases.\n\n"
+        "Allowed canonical shapes:\n"
+        "- relationship: subject=A, predicate=relationship_to, object=B, value=role, relation_type=role. For multiple simultaneous roles, use relation_types.\n"
+        "- knowledge: subject=knower, predicate=knows or learned, object=the information known, value=known or learned.\n"
+        "- status: predicate age, role, life_status, affiliation, rank, title, family_business_involvement, or another short state name; value is the state.\n"
+        "- trait: predicate hair_color, eye_color, height, build, appearance, personality, or another stable trait; value is the trait value.\n"
+        "- ability: predicate ability, skill, power, or limitation; value is the ability or limitation.\n"
+        "- possession: predicate owns, carries, lost, gained, gave, or received; object is the item.\n"
+        "- location: predicate current_location, residence, origin, destination, arrived_at, or left; object is the place.\n"
+        "- event: predicate is the concrete action, e.g. met, killed, escaped, revealed, promised; object is the target if any.\n"
+        "- world_rule: predicate rule, restriction, requirement, prohibition, or exception; object is the governed topic; value is the rule.\n"
+        "- timeline: predicate must be before, after, during, same_time_as, or story_order; object is the other event or time marker.\n\n"
+        "Forbidden shapes and replacements:\n"
+        "- Do not use type=character for profile attributes. Use status, trait, ability, possession, or location.\n"
+        "- Do not emit predicates beginning with has_, have_, is_, was_, became_, revealed_that_, or knows_that_. Strip helper verbs.\n"
+        "- Bad fields: type=character, subject=Reika Amagi, predicate=has_age, value=26. "
+        "Good fields: type=status, subject=Reika Amagi, predicate=age, object='', value=26.\n"
+        "- Bad fields: type=character, subject=Jouji Kiriyama, predicate=has_age, value=mid-fifties. "
+        "Good fields: type=status, subject=Jouji Kiriyama, predicate=age, object='', value=mid-fifties.\n"
+        "- Bad fields: type=character, subject=Sena Hikawa, predicate=has_role, value=student. "
+        "Good fields: type=status, subject=Sena Hikawa, predicate=role, object='', value=student.\n"
+        "- Bad fields: type=character, subject=Mara, predicate=has_hair_color, value=black. "
+        "Good fields: type=trait, subject=Mara, predicate=hair_color, object='', value=black.\n"
+        "- Bad fields: type=character, subject=Mara, predicate=has_ability, value=swordsmanship. "
+        "Good fields: type=ability, subject=Mara, predicate=ability, object='', value=swordsmanship.\n"
+        "- Bad fields: type=character, subject=Mara, predicate=has_weapon, value=sword. "
+        "Good fields: type=possession, subject=Mara, predicate=owns, object=sword, value=''.\n"
+        "- Bad fields: type=timeline, subject=Sena, predicate=was_a_student_when_she_met, object=Kaito, value=not involved in family business. "
+        "Good fields: separate status role=student; event met object=Kaito; status family_business_involvement object=family business value=not involved.\n"
+        "- Bad fields: type=knowledge, subject=Reika, predicate=revealed_her_ex_boyfriend_was_her, object=classmate, value=classmates. "
+        "Good fields: type=knowledge, subject=Rikiya Anraku, predicate=learned, object=Reika's ex-boyfriend was her classmate, value=learned, only if Rikiya explicitly learned it.\n\n"
+        "Relationship rule:\n"
+        "- Keep relationship dimensions distinct. If A is B's lover and boss, emit relation_types ['lover', 'boss'] "
+        "or two relationship facts with the same subject/object. Do not collapse them into one vague value.\n\n"
         f"Return JSON matching this shape:\n{json.dumps(schema, indent=2)}\n\n"
         f"Text:\n{text}"
     )
