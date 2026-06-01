@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,6 @@ from src.providers import (
     fetch_gemini_models,
     fetch_ollama_models,
     fetch_openai_compatible_models,
-    normalized_provider_settings,
     save_provider_settings_to_disk,
     suggested_char_limit,
 )
@@ -236,50 +236,49 @@ def autosave_project_state() -> None:
         st.session_state.project_memory_saved_signature = signature
 
 
-def load_browser_project_folder(files: list[Any]) -> None:
-    if not files:
-        return
+def choose_project_folder_dialog(initial_dir: Path) -> str:
+    script = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
 
-    token = "|".join(sorted(f"{file.name}:{getattr(file, 'size', 0)}" for file in files))
-    if st.session_state.get("browser_project_folder_token") == token:
-        return
+$initial = $args[0]
+if (-not [System.IO.Directory]::Exists($initial)) {
+    $initial = [Environment]::GetFolderPath('MyDocuments')
+}
 
-    by_name = {Path(file.name).name.lower(): file for file in files}
-    memory_upload = by_name.get("lorelock_memory.json")
-    provider_upload = by_name.get("provider_settings.json")
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Choose LoreLock project folder'
+$dialog.ShowNewFolderButton = $true
+$dialog.SelectedPath = $initial
 
-    loaded_parts = []
-    if memory_upload is not None:
-        try:
-            data = json.loads(memory_upload.getvalue().decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            st.warning(f"Could not load lorelock_memory.json: {summarize_exception(exc)}")
-        else:
-            st.session_state.memory = normalize_facts(data if isinstance(data, list) else data.get("facts", []), {})
-            st.session_state.candidates = []
-            st.session_state.scene_facts = []
-            st.session_state.issues = []
-            st.session_state.scene_metadata = {}
-            st.session_state.project_memory_saved_signature = ""
-            loaded_parts.append(f"{len(st.session_state.memory)} fact(s)")
+if ($dialog.GetType().GetProperty('UseDescriptionForTitle') -ne $null) {
+    $dialog.UseDescriptionForTitle = $true
+}
+if ($dialog.GetType().GetProperty('AutoUpgradeEnabled') -ne $null) {
+    $dialog.AutoUpgradeEnabled = $true
+}
 
-    if provider_upload is not None:
-        try:
-            raw_settings = json.loads(provider_upload.getvalue().decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            st.warning(f"Could not load provider_settings.json: {summarize_exception(exc)}")
-        else:
-            if isinstance(raw_settings, dict):
-                for key, value in normalized_provider_settings(raw_settings).items():
-                    st.session_state[f"provider_{key}"] = value
-                loaded_parts.append("provider settings")
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $dialog.SelectedPath
+}
+"""
+    kwargs: dict[str, Any] = {}
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if creationflags:
+        kwargs["creationflags"] = creationflags
 
-    if not loaded_parts:
-        st.warning("That folder did not include lorelock_memory.json or provider_settings.json.")
-        return
-
-    st.session_state.browser_project_folder_token = token
-    st.session_state.project_notice = f"Loaded browser-selected project folder: {', '.join(loaded_parts)}."
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", script, str(initial_dir)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        **kwargs,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "Folder picker failed.")
+    return result.stdout.strip()
 
 
 def render_model_selector(
@@ -328,14 +327,16 @@ def render_provider_sidebar() -> ProviderConfig:
     with st.sidebar:
         st.header("Project")
         project_folder = resolve_project_folder(st.session_state.project_folder_input)
-        st.caption(f"Autosave target: `{project_folder}`")
-        browser_project_files = st.file_uploader(
-            "Browse project folder",
-            type=["json"],
-            accept_multiple_files="directory",
-            key="browser_project_folder",
-            help="Uses the browser's folder picker. Loads lorelock_memory.json and provider_settings.json if they are in the selected folder.",
-        )
+        st.caption(f"Using `{project_folder}`")
+        if st.button("Browse for project folder", use_container_width=True):
+            try:
+                selected_folder = choose_project_folder_dialog(project_folder)
+            except Exception as exc:
+                st.warning(f"Could not open folder picker: {summarize_exception(exc)}")
+            else:
+                if selected_folder:
+                    st.session_state.project_folder_input = selected_folder
+                    st.rerun()
 
         with st.expander("Manual path", expanded=False):
             project_folder_text = st.text_input(
@@ -347,7 +348,6 @@ def render_provider_sidebar() -> ProviderConfig:
 
         ensure_project_loaded(project_folder)
         ensure_provider_settings_state(project_provider_settings_file(project_folder))
-        load_browser_project_folder(browser_project_files or [])
         if st.session_state.get("project_notice"):
             st.caption(st.session_state.project_notice)
 

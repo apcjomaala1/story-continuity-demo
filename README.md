@@ -24,7 +24,7 @@ The continuity checker itself is deterministic and explainable. The LLM, if enab
 
 The OpenAI API option uses the OpenAI chat completions request shape. If another provider accepts that same request shape, enter that provider's base URL in the OpenAI API base URL field.
 
-Use **Browse project folder** in the sidebar to load `lorelock_memory.json` and `provider_settings.json` through the browser folder picker. Set the manual project-folder path for automatic saving; browsers do not expose writable folder paths to Python. The app keeps the last selected autosave path in `data/project_settings.json`.
+Choose a project folder in the sidebar. LoreLock automatically loads and saves `lorelock_memory.json` and `provider_settings.json` in that folder. The app only keeps the last selected project-folder path in `data/project_settings.json`.
 
 Each provider section can refresh available models from the configured API and show them as a dropdown. If the provider cannot list models, the app falls back to a manual model-name field.
 
