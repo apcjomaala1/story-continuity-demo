@@ -11,11 +11,16 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 MEMORY_FILE = DATA_DIR / "working_memory.json"
+LIVE_TEXTAREA = components.declare_component(
+    "live_textarea",
+    path=str(APP_DIR / "components" / "live_textarea"),
+)
 
 FACT_TYPES = [
     "character",
@@ -171,42 +176,6 @@ def apply_compact_styles() -> None:
         [data-testid="stAlert"] {
             font-size: 0.86rem !important;
         }
-
-        .lorelock-suggestion {
-            margin: 0.35rem 0 0.65rem;
-            padding: 0.55rem 0.65rem;
-            border: 1px solid #d8dee8;
-            border-radius: 0.45rem;
-            background: #f8fafc;
-            color: #334155;
-            font-size: 0.82rem;
-            line-height: 1.3;
-        }
-
-        .lorelock-suggestion strong {
-            display: block;
-            color: #17212b;
-            font-size: 0.9rem;
-            line-height: 1.2;
-            margin-bottom: 0.25rem;
-        }
-
-        .lorelock-counter {
-            margin-top: -0.35rem;
-            margin-bottom: 0.75rem;
-            padding: 0.38rem 0.55rem;
-            border: 1px solid var(--counter-border);
-            border-radius: 0.4rem;
-            background: var(--counter-bg);
-            color: var(--counter-fg);
-            font-size: 0.78rem;
-            line-height: 1.2;
-            font-weight: 650;
-        }
-
-        .lorelock-counter span {
-            font-weight: 450;
-        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -242,7 +211,7 @@ def render_provider_sidebar() -> ProviderConfig:
             help="Choose how deep the extractor should look. The app then suggests a matching excerpt length.",
         )
         profile = EXCERPT_PROFILES[extraction_depth]
-        render_suggested_length(profile)
+        st.caption(f"Suggested excerpt: {profile['recommended_chars']:,} chars")
         st.info(profile["guidance"])
         ollama_url = "http://localhost:11434"
         ollama_model = "llama3.2:3b"
@@ -312,66 +281,28 @@ def excerpt_profile(provider: ProviderConfig) -> dict[str, Any]:
     return EXCERPT_PROFILES.get(provider.extraction_depth, EXCERPT_PROFILES["Normal scene/chapter excerpt"])
 
 
-def render_suggested_length(profile: dict[str, Any]) -> None:
-    st.markdown(
-        f"""
-        <div class="lorelock-suggestion">
-            <strong>Suggested excerpt: {profile['recommended_chars']:,} chars</strong>
-            Applies to both memory ingestion and scene checking. Soft target, not a limit.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_extraction_guidance(provider: ProviderConfig) -> None:
+def render_live_textarea(
+    label: str,
+    *,
+    value: str,
+    placeholder: str,
+    key: str,
+    provider: ProviderConfig,
+    seed_token: str = "",
+    height: int = 360,
+) -> str:
     profile = excerpt_profile(provider)
-    st.info(
-        f"Suggested for **{profile['label']}** depth: about **{profile['recommended_chars']:,} characters**. "
-        "This is a soft target, not a limit."
+    result = LIVE_TEXTAREA(
+        label=label,
+        value=value,
+        placeholder=placeholder,
+        height=height,
+        suggested_chars=int(profile["recommended_chars"]),
+        seed_token=seed_token,
+        default=value,
+        key=key,
     )
-
-
-def render_character_counter(text: str, provider: ProviderConfig) -> None:
-    profile = excerpt_profile(provider)
-    suggested = int(profile["recommended_chars"])
-    count = len(text)
-    ratio = count / suggested if suggested else 0
-
-    if ratio > 1:
-        background = "#fef2f2"
-        border = "#dc2626"
-        color = "#991b1b"
-        status = "Over suggested length"
-    elif ratio >= 0.85:
-        background = "#fffbeb"
-        border = "#d97706"
-        color = "#92400e"
-        status = "Near suggested length"
-    else:
-        background = "#f8fafc"
-        border = "#cbd5e1"
-        color = "#334155"
-        status = "Within suggested length"
-
-    st.markdown(
-        f"""
-        <div style="
-            margin-top: -0.35rem;
-            margin-bottom: 0.75rem;
-            padding: 0.55rem 0.75rem;
-            border: 1px solid {border};
-            border-radius: 0.5rem;
-            background: {background};
-            color: {color};
-            font-weight: 700;
-        ">
-            {count:,} / {suggested:,} chars
-            <span style="font-weight: 500;"> · {status}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    return result if isinstance(result, str) else value
 
 
 def render_ingest_tab(provider: ProviderConfig) -> None:
@@ -385,21 +316,23 @@ def render_ingest_tab(provider: ProviderConfig) -> None:
     with meta_col:
         metadata = render_metadata_form("ingest", default_source="story note")
         uploaded = st.file_uploader("Optional text file", type=["txt", "md"])
-        render_extraction_guidance(provider)
 
     uploaded_text = ""
+    seed_token = ""
     if uploaded is not None:
         uploaded_text = uploaded.getvalue().decode("utf-8", errors="replace")
         metadata["source"] = uploaded.name
+        seed_token = f"{uploaded.name}:{len(uploaded_text)}"
 
     with text_col:
-        text = st.text_area(
+        text = render_live_textarea(
             "Source text",
             value=uploaded_text,
-            height=360,
             placeholder="Paste story material here.",
+            key="source_text_live",
+            provider=provider,
+            seed_token=seed_token,
         )
-        render_character_counter(text, provider)
 
     if st.button("Extract candidate memory", type="primary", use_container_width=True):
         if not text.strip():
@@ -542,16 +475,15 @@ def render_check_tab(provider: ProviderConfig) -> None:
     meta_col, text_col = st.columns([0.34, 0.66], gap="large")
     with meta_col:
         metadata = render_metadata_form("check", default_source="draft scene")
-        render_extraction_guidance(provider)
 
     with text_col:
-        scene_text = st.text_area(
+        scene_text = render_live_textarea(
             "Draft scene",
-            height=360,
             placeholder="Paste the scene you want to check.",
-            key="scene_text",
+            value="",
+            key="scene_text_live",
+            provider=provider,
         )
-        render_character_counter(scene_text, provider)
 
     if st.button("Extract and check scene", type="primary", use_container_width=True):
         if not scene_text.strip():

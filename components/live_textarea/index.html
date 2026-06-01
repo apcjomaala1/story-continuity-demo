@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17212b;
+        --muted: #667085;
+        --line: #d8dee8;
+        --field: #ffffff;
+        --ok-bg: #f8fafc;
+        --ok-line: #cbd5e1;
+        --ok-fg: #334155;
+        --warn-bg: #fffbeb;
+        --warn-line: #d97706;
+        --warn-fg: #92400e;
+        --over-bg: #fef2f2;
+        --over-line: #dc2626;
+        --over-fg: #991b1b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: var(--ink);
+        font-size: 0.86rem;
+        font-weight: 600;
+      }
+
+      textarea {
+        display: block;
+        width: 100%;
+        min-height: 180px;
+        padding: 0.7rem 0.8rem;
+        border: 1px solid var(--line);
+        border-radius: 0.45rem;
+        background: var(--field);
+        color: var(--ink);
+        font: 0.82rem/1.38 Arial, Helvetica, sans-serif;
+        resize: vertical;
+        outline: none;
+      }
+
+      textarea:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 1px #2563eb;
+      }
+
+      .counter {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-top: 0.4rem;
+        padding: 0.38rem 0.55rem;
+        border: 1px solid var(--counter-line);
+        border-radius: 0.4rem;
+        background: var(--counter-bg);
+        color: var(--counter-fg);
+        font-size: 0.78rem;
+        line-height: 1.2;
+      }
+
+      .count {
+        font-weight: 700;
+      }
+
+      .hint {
+        color: inherit;
+        opacity: 0.82;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <label id="label" for="textarea"></label>
+    <textarea id="textarea"></textarea>
+    <div id="counter" class="counter">
+      <span id="count" class="count">0 chars</span>
+      <span id="hint" class="hint"></span>
+    </div>
+
+    <script>
+      const textarea = document.getElementById("textarea");
+      const label = document.getElementById("label");
+      const counter = document.getElementById("counter");
+      const count = document.getElementById("count");
+      const hint = document.getElementById("hint");
+
+      let suggestedChars = 4000;
+      let initialized = false;
+      let lastSeedToken = "";
+      let sendTimer = null;
+
+      function post(type, data) {
+        window.parent.postMessage({ type, ...data }, "*");
+      }
+
+      function setFrameHeight() {
+        const height = document.documentElement.scrollHeight;
+        post("streamlit:setFrameHeight", { height });
+      }
+
+      function formatNumber(value) {
+        return new Intl.NumberFormat().format(value);
+      }
+
+      function updateCounter() {
+        const length = textarea.value.length;
+        const ratio = suggestedChars ? length / suggestedChars : 0;
+        let background = "var(--ok-bg)";
+        let border = "var(--ok-line)";
+        let color = "var(--ok-fg)";
+        let state = "suggested " + formatNumber(suggestedChars);
+
+        if (ratio > 1) {
+          background = "var(--over-bg)";
+          border = "var(--over-line)";
+          color = "var(--over-fg)";
+          state = "above suggestion";
+        } else if (ratio >= 0.85) {
+          background = "var(--warn-bg)";
+          border = "var(--warn-line)";
+          color = "var(--warn-fg)";
+          state = "near suggestion";
+        }
+
+        counter.style.setProperty("--counter-bg", background);
+        counter.style.setProperty("--counter-line", border);
+        counter.style.setProperty("--counter-fg", color);
+        count.textContent = formatNumber(length) + " chars";
+        hint.textContent = state;
+      }
+
+      function sendValue() {
+        post("streamlit:setComponentValue", { value: textarea.value });
+      }
+
+      function scheduleSend() {
+        window.clearTimeout(sendTimer);
+        sendTimer = window.setTimeout(sendValue, 180);
+      }
+
+      textarea.addEventListener("input", () => {
+        updateCounter();
+        scheduleSend();
+        setFrameHeight();
+      });
+
+      textarea.addEventListener("blur", sendValue);
+
+      window.addEventListener("message", event => {
+        if (!event.data || event.data.type !== "streamlit:render") {
+          return;
+        }
+
+        const args = event.data.args || {};
+        suggestedChars = Number(args.suggested_chars || suggestedChars || 4000);
+        label.textContent = args.label || "";
+        textarea.placeholder = args.placeholder || "";
+        textarea.style.height = Number(args.height || 360) + "px";
+
+        const incomingValue = typeof args.value === "string" ? args.value : "";
+        const seedToken = String(args.seed_token || "");
+        const shouldApplySeed = seedToken && seedToken !== lastSeedToken;
+        if (!initialized || shouldApplySeed || (incomingValue && textarea.value.length === 0)) {
+          textarea.value = incomingValue;
+          initialized = true;
+          lastSeedToken = seedToken;
+        }
+
+        updateCounter();
+        setFrameHeight();
+      });
+
+      post("streamlit:componentReady", { apiVersion: 1 });
+      setFrameHeight();
+    </script>
+  </body>
+</html>

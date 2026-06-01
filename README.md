@@ -32,6 +32,8 @@ The app asks for an extraction depth, then suggests an excerpt length:
 
 This applies to both memory ingestion and scene checking because both steps perform fact extraction. The suggested length is not a hard limit: the text box counter turns yellow near the target and red when it exceeds it. Longer excerpts give more context, but they also cost more, run slower, and produce more candidate facts to review. Privacy is controlled by the extraction provider choice, not by this setting.
 
+The main story text boxes use a small local component so character counts update while typing instead of relying on Streamlit's native apply cycle.
+
 ## Run
 
 ```powershell
@@ -53,6 +55,7 @@ $env:CLAUDE_MODEL="claude-sonnet-4-6"
 ## Project Shape
 
 - `app.py` - Streamlit app, extraction providers, local heuristic extractor, continuity checker
+- `components/live_textarea/` - local textarea component with live character counting
 - `docs/erd.md` - conceptual ERD for the full continuity memory model
 - `docs/demo-plan.md` - presentation-oriented demo plan
 - `data/` - optional local memory saves; JSON files in this folder are gitignored
