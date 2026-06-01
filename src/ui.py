@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -11,9 +12,8 @@ from src.constants import (
     DATA_DIR,
     EXCERPT_PROFILES,
     FACT_TYPES,
-    MEMORY_FILE,
-    PROVIDER_BASE_URL_KEYS,
     PROVIDER_MODES,
+    PROJECT_SETTINGS_FILE,
     ContinuityIssue,
     ProviderConfig,
 )
@@ -58,6 +58,8 @@ def main() -> None:
         render_memory_tab()
     with tabs[2]:
         render_privacy_tab()
+
+    autosave_project_state()
 
 
 def apply_compact_styles() -> None:
@@ -126,6 +128,7 @@ def apply_compact_styles() -> None:
 
 
 def ensure_state() -> None:
+    st.session_state.setdefault("project_folder_input", load_last_project_folder())
     st.session_state.setdefault("memory", [])
     st.session_state.setdefault("candidates", [])
     st.session_state.setdefault("scene_facts", [])
@@ -135,7 +138,101 @@ def ensure_state() -> None:
     st.session_state.setdefault("scene_metadata", {})
     st.session_state.setdefault("metadata_notice", "")
     st.session_state.setdefault("metadata_debug", "")
-    ensure_provider_settings_state()
+    st.session_state.project_folder_path = str(resolve_project_folder(st.session_state.project_folder_input))
+
+
+def load_last_project_folder() -> str:
+    try:
+        data = json.loads(PROJECT_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return str(DATA_DIR)
+    if isinstance(data, dict) and as_text(data.get("project_folder")).strip():
+        return as_text(data["project_folder"]).strip()
+    return str(DATA_DIR)
+
+
+def resolve_project_folder(value: str) -> Path:
+    raw = as_text(value).strip() or str(DATA_DIR)
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = APP_DIR / path
+    return path.resolve(strict=False)
+
+
+def current_project_folder() -> Path:
+    return resolve_project_folder(st.session_state.get("project_folder_input", str(DATA_DIR)))
+
+
+def project_memory_file(project_folder: Path | None = None) -> Path:
+    return (project_folder or current_project_folder()) / "lorelock_memory.json"
+
+
+def project_provider_settings_file(project_folder: Path | None = None) -> Path:
+    return (project_folder or current_project_folder()) / "provider_settings.json"
+
+
+def ensure_project_loaded(project_folder: Path) -> None:
+    project_key = str(project_folder)
+    if st.session_state.get("project_loaded_from") == project_key:
+        return
+
+    try:
+        project_folder.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        st.session_state.project_notice = f"Could not open project folder: {summarize_exception(exc)}"
+        return
+
+    memory_file = project_memory_file(project_folder)
+    if memory_file.exists():
+        try:
+            data = json.loads(memory_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            st.session_state.memory = []
+            st.session_state.project_notice = f"Could not load project memory: {summarize_exception(exc)}"
+        else:
+            st.session_state.memory = normalize_facts(data if isinstance(data, list) else data.get("facts", []), {})
+            st.session_state.project_notice = f"Loaded {len(st.session_state.memory)} fact(s) from {memory_file.name}."
+    else:
+        st.session_state.memory = []
+        st.session_state.project_notice = f"Started a new project memory file: {memory_file.name}."
+
+    st.session_state.candidates = []
+    st.session_state.scene_facts = []
+    st.session_state.issues = []
+    st.session_state.scene_metadata = {}
+    st.session_state.project_loaded_from = project_key
+    st.session_state.project_memory_saved_signature = ""
+
+
+def autosave_project_state() -> None:
+    project_folder = current_project_folder()
+    try:
+        project_folder.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        st.sidebar.warning(f"Could not open project folder: {summarize_exception(exc)}")
+        return
+
+    PROJECT_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    project_config = json.dumps({"project_folder": str(project_folder)}, indent=2, ensure_ascii=False)
+    try:
+        if not PROJECT_SETTINGS_FILE.exists() or PROJECT_SETTINGS_FILE.read_text(encoding="utf-8") != project_config:
+            PROJECT_SETTINGS_FILE.write_text(project_config, encoding="utf-8")
+    except OSError as exc:
+        st.sidebar.warning(f"Could not remember project folder: {summarize_exception(exc)}")
+
+    memory_file = project_memory_file(project_folder)
+    content = json.dumps(st.session_state.memory, indent=2, ensure_ascii=False)
+    signature = f"{memory_file}:{content}"
+    if st.session_state.get("project_memory_saved_signature") == signature:
+        return
+
+    try:
+        if not memory_file.exists() or memory_file.read_text(encoding="utf-8") != content:
+            memory_file.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        st.sidebar.warning(f"Could not auto-save memory: {summarize_exception(exc)}")
+    else:
+        st.session_state.project_memory_saved_signature = signature
 
 
 def render_model_selector(
@@ -182,6 +279,20 @@ def render_model_selector(
 
 def render_provider_sidebar() -> ProviderConfig:
     with st.sidebar:
+        st.header("Project")
+        project_folder_text = st.text_input(
+            "Project folder",
+            key="project_folder_input",
+            help="LoreLock auto-loads and auto-saves JSON files in this folder. Relative paths are resolved from the app folder.",
+        )
+        project_folder = resolve_project_folder(project_folder_text)
+        st.caption(f"Using `{project_folder}`")
+        ensure_project_loaded(project_folder)
+        ensure_provider_settings_state(project_provider_settings_file(project_folder))
+        if st.session_state.get("project_notice"):
+            st.caption(st.session_state.project_notice)
+
+        st.divider()
         st.header("Writing Assistant")
         mode = st.selectbox(
             "Reading engine",
@@ -253,10 +364,8 @@ def render_provider_sidebar() -> ProviderConfig:
         api_key = provider_values["api_key"]
         api_model = provider_values["api_model"]
 
-        from src.constants import PROVIDER_SETTINGS_FILE as _settings_file
-
         st.caption(
-            f"Provider settings are saved locally to `{_settings_file.name}`. "
+            f"Provider settings auto-save to `{project_provider_settings_file(project_folder).name}`. "
             "Text routing is controlled by the selected reading engine."
         )
         fallback_to_heuristic = st.checkbox(
@@ -267,9 +376,10 @@ def render_provider_sidebar() -> ProviderConfig:
 
         st.divider()
         st.metric("Story facts saved", len(st.session_state.memory))
-        if st.button("Load saved story memory", use_container_width=True):
+        st.caption(f"Story memory auto-saves to `{project_memory_file(project_folder).name}`.")
+        if st.button("Reload project memory", use_container_width=True):
             load_memory_from_disk()
-        if st.button("Save story memory locally", use_container_width=True):
+        if st.button("Save project memory now", use_container_width=True):
             save_memory_to_disk()
 
     provider = ProviderConfig(
@@ -288,7 +398,10 @@ def render_provider_sidebar() -> ProviderConfig:
         api_model=api_model.strip(),
         fallback_to_heuristic=fallback_to_heuristic,
     )
-    save_provider_settings_to_disk(provider)
+    try:
+        save_provider_settings_to_disk(provider, project_provider_settings_file(project_folder))
+    except OSError as exc:
+        st.sidebar.warning(f"Could not auto-save provider settings: {summarize_exception(exc)}")
     return provider
 
 
@@ -768,8 +881,8 @@ def render_privacy_tab() -> None:
 - **Reading depth**: controls the suggested excerpt length and how many facts the reader is asked to return.
 - **Optional splitting**: over-limit pasted text can be split into suggested-length parts, which makes one extraction call per part.
 - **Approved memory only**: extracted facts are suggestions until the writer approves them.
-- **Local saves**: saved memory goes to `data/working_memory.json`, which is gitignored.
-- **Provider settings**: saved provider choices, endpoints, models, and API keys go to `data/provider_settings.json`, which is gitignored.
+- **Project folder**: memory auto-saves to `lorelock_memory.json` in the selected project folder.
+- **Provider settings**: provider choices, endpoints, models, and API keys auto-save to `provider_settings.json` in the selected project folder.
 """
     )
 
@@ -798,18 +911,22 @@ def render_provider_feedback(key_prefix: str) -> None:
 
 
 def save_memory_to_disk() -> None:
-    DATA_DIR.mkdir(exist_ok=True)
-    MEMORY_FILE.write_text(
+    memory_file = project_memory_file()
+    memory_file.parent.mkdir(parents=True, exist_ok=True)
+    memory_file.write_text(
         json.dumps(st.session_state.memory, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    st.sidebar.success(f"Saved to {MEMORY_FILE.name}.")
+    st.session_state.project_memory_saved_signature = f"{memory_file}:{json.dumps(st.session_state.memory, indent=2, ensure_ascii=False)}"
+    st.sidebar.success(f"Saved to {memory_file.name}.")
 
 
 def load_memory_from_disk() -> None:
-    if not MEMORY_FILE.exists():
+    memory_file = project_memory_file()
+    if not memory_file.exists():
         st.sidebar.warning("No saved memory file yet.")
         return
-    data = json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+    data = json.loads(memory_file.read_text(encoding="utf-8"))
     st.session_state.memory = normalize_facts(data if isinstance(data, list) else data.get("facts", []), {})
+    st.session_state.project_memory_saved_signature = ""
     st.sidebar.success(f"Loaded {len(st.session_state.memory)} fact(s).")

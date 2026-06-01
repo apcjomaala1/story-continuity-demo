@@ -5,10 +5,10 @@ import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from src.constants import (
-    DATA_DIR,
     EXCERPT_PROFILES,
     PROVIDER_BASE_URL_KEYS,
     PROVIDER_MODE_ALIASES,
@@ -451,13 +451,14 @@ def default_provider_settings() -> dict[str, Any]:
     }
 
 
-def load_provider_settings_from_disk() -> dict[str, Any]:
+def load_provider_settings_from_disk(settings_file: Path | None = None) -> dict[str, Any]:
+    settings_file = settings_file or PROVIDER_SETTINGS_FILE
     settings = default_provider_settings()
-    if not PROVIDER_SETTINGS_FILE.exists():
+    if not settings_file.exists():
         return settings
 
     try:
-        saved = json.loads(PROVIDER_SETTINGS_FILE.read_text(encoding="utf-8"))
+        saved = json.loads(settings_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return settings
 
@@ -507,26 +508,29 @@ def provider_settings_payload(provider: ProviderConfig) -> dict[str, Any]:
     }
 
 
-def save_provider_settings_to_disk(provider: ProviderConfig) -> None:
-    DATA_DIR.mkdir(exist_ok=True)
+def save_provider_settings_to_disk(provider: ProviderConfig, settings_file: Path | None = None) -> None:
+    settings_file = settings_file or PROVIDER_SETTINGS_FILE
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(provider_settings_payload(provider), indent=2, ensure_ascii=False)
     try:
-        if PROVIDER_SETTINGS_FILE.exists() and PROVIDER_SETTINGS_FILE.read_text(encoding="utf-8") == content:
+        if settings_file.exists() and settings_file.read_text(encoding="utf-8") == content:
             return
     except OSError:
         pass
-    PROVIDER_SETTINGS_FILE.write_text(content, encoding="utf-8")
+    settings_file.write_text(content, encoding="utf-8")
 
 
-def ensure_provider_settings_state() -> None:
+def ensure_provider_settings_state(settings_file: Path | None = None) -> None:
     import streamlit as st
 
+    settings_file = settings_file or PROVIDER_SETTINGS_FILE
     defaults = default_provider_settings()
+    settings_key = str(settings_file.resolve())
 
-    if not st.session_state.get("provider_settings_initialized"):
-        for key, value in load_provider_settings_from_disk().items():
-            st.session_state.setdefault(f"provider_{key}", value)
-        st.session_state.provider_settings_initialized = True
+    if st.session_state.get("provider_settings_loaded_from") != settings_key:
+        for key, value in load_provider_settings_from_disk(settings_file).items():
+            st.session_state[f"provider_{key}"] = value
+        st.session_state.provider_settings_loaded_from = settings_key
 
     for key in PROVIDER_BASE_URL_KEYS:
         state_key = f"provider_{key}"

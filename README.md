@@ -24,7 +24,7 @@ The continuity checker itself is deterministic and explainable. The LLM, if enab
 
 The OpenAI API option uses the OpenAI chat completions request shape. If another provider accepts that same request shape, enter that provider's base URL in the OpenAI API base URL field.
 
-Provider choices, endpoint URLs, model names, fallback preference, and API key fields are persisted locally in `data/provider_settings.json`. That file is gitignored.
+Choose a project folder in the sidebar. LoreLock automatically loads and saves `lorelock_memory.json` and `provider_settings.json` in that folder. The app only keeps the last selected project-folder path in `data/project_settings.json`.
 
 Each provider section can refresh available models from the configured API and show them as a dropdown. If the provider cannot list models, the app falls back to a manual model-name field.
 

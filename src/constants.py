@@ -9,6 +9,7 @@ APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
 MEMORY_FILE = DATA_DIR / "working_memory.json"
 PROVIDER_SETTINGS_FILE = DATA_DIR / "provider_settings.json"
+PROJECT_SETTINGS_FILE = DATA_DIR / "project_settings.json"
 PROVIDER_MODES = [
     "Ollama API",
     "Gemini API",
