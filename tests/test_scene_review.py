@@ -9,7 +9,7 @@ from src.constants import ProviderConfig
 
 def make_provider() -> ProviderConfig:
     return ProviderConfig(
-        mode="Ollama local LLM",
+        mode="Ollama API",
         extraction_depth="Normal scene/chapter excerpt",
         ollama_url="http://localhost:11434",
         ollama_model="llama3.2:3b",
@@ -28,11 +28,15 @@ def make_provider() -> ProviderConfig:
 
 def test_scene_review_extracts_and_checks_against_memory(monkeypatch) -> None:
     provider = make_provider()
-    metadata = {"source": "draft scene", "chapter": 1, "story_order": 1}
+    overrides = {"source": "", "chapter": "", "story_order": "", "scene_time": "", "location": "", "pov": ""}
     facts = [{"id": "fact-1", "type": "event"}]
     memory = [{"id": "memory-1", "type": "event"}]
     issues = [object()]
     calls = {}
+
+    def fake_infer(text, provider_arg):
+        calls["infer"] = (text, provider_arg)
+        return {"chapter": 3, "story_order": 3, "location": "Atrium"}, "metadata notice", ""
 
     def fake_extract(text, metadata_arg, provider_arg, *, split_over_limit):
         calls["extract"] = (text, metadata_arg, provider_arg, split_over_limit)
@@ -42,26 +46,40 @@ def test_scene_review_extracts_and_checks_against_memory(monkeypatch) -> None:
         calls["check"] = (text, facts_arg, memory_arg)
         return issues
 
+    monkeypatch.setattr(ui, "infer_scene_metadata", fake_infer)
     monkeypatch.setattr(ui, "extract_facts_for_text", fake_extract)
     monkeypatch.setattr(ui, "check_continuity", fake_check)
 
     result = ui.review_text_against_memory(
         "Mara is Dain's boss.",
-        metadata,
+        overrides,
+        "draft scene",
         provider,
         memory,
         split_over_limit=True,
     )
 
-    assert result == (facts, issues, "notice", "debug")
-    assert calls["extract"] == ("Mara is Dain's boss.", metadata, provider, True)
+    merged_metadata = {
+        "source": "draft scene",
+        "chapter": 3,
+        "story_order": 3,
+        "scene_time": "",
+        "location": "Atrium",
+        "pov": "",
+    }
+    assert result == (facts, issues, "metadata notice notice", "debug", merged_metadata)
+    assert calls["infer"] == ("Mara is Dain's boss.", provider)
+    assert calls["extract"] == ("Mara is Dain's boss.", merged_metadata, provider, True)
     assert calls["check"] == ("Mara is Dain's boss.", facts, memory)
 
 
 def test_scene_review_skips_check_when_memory_is_empty(monkeypatch) -> None:
     provider = make_provider()
-    metadata = {"source": "draft scene", "chapter": 1, "story_order": 1}
+    overrides = {"source": "", "chapter": "", "story_order": "", "scene_time": "", "location": "", "pov": ""}
     facts = [{"id": "fact-1", "type": "event"}]
+
+    def fake_infer(text, provider_arg):
+        return {}, "metadata notice", ""
 
     def fake_extract(text, metadata_arg, provider_arg, *, split_over_limit):
         return facts, "notice", ""
@@ -69,15 +87,30 @@ def test_scene_review_skips_check_when_memory_is_empty(monkeypatch) -> None:
     def fail_check(*args, **kwargs):
         raise AssertionError("empty memory should not be checked")
 
+    monkeypatch.setattr(ui, "infer_scene_metadata", fake_infer)
     monkeypatch.setattr(ui, "extract_facts_for_text", fake_extract)
     monkeypatch.setattr(ui, "check_continuity", fail_check)
 
     result = ui.review_text_against_memory(
         "Mara arrived.",
-        metadata,
+        overrides,
+        "draft scene",
         provider,
         [],
         split_over_limit=False,
     )
 
-    assert result == (facts, [], "notice", "")
+    assert result == (
+        facts,
+        [],
+        "metadata notice notice",
+        "",
+        {
+            "source": "draft scene",
+            "chapter": 1,
+            "story_order": 1,
+            "scene_time": "",
+            "location": "",
+            "pov": "",
+        },
+    )

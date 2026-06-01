@@ -10,11 +10,15 @@ DATA_DIR = APP_DIR / "data"
 MEMORY_FILE = DATA_DIR / "working_memory.json"
 PROVIDER_SETTINGS_FILE = DATA_DIR / "provider_settings.json"
 PROVIDER_MODES = [
-    "Ollama local LLM",
+    "Ollama API",
     "Gemini API",
     "Claude API",
-    "OpenAI-compatible API",
+    "OpenAI API",
 ]
+PROVIDER_MODE_ALIASES = {
+    "Ollama local LLM": "Ollama API",
+    "OpenAI-compatible API": "OpenAI API",
+}
 PROVIDER_BASE_URL_KEYS = {
     "ollama_url",
     "gemini_url",

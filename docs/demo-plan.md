@@ -7,14 +7,14 @@ Show a generic writing continuity agent that can build memory from arbitrary sto
 ## Demo Flow
 
 1. Run `streamlit run app.py`.
-2. Use **Ollama local LLM** for a privacy-preserving demo, or use Gemini/Claude/OpenAI-compatible API if keys are configured.
+2. Use **Ollama API** for a local-provider demo, or use Gemini API, Claude API, or OpenAI API if keys are configured.
 3. Use **Standard** extraction depth.
 4. Paste a short character sheet, outline, or chapter excerpt into **Ingest Memory**.
 5. Click **Extract candidate memory**.
 6. Approve the useful facts.
 7. Open **Memory Graph** and show the structured memory.
 8. Open **Check Scene**, paste a scene with an intentional contradiction, and run the check.
-9. Explain that Ollama, Gemini, Claude, or an OpenAI-compatible API can improve extraction quality when privacy constraints allow it.
+9. Explain that Ollama API, Gemini API, Claude API, or OpenAI API can improve extraction quality when privacy constraints allow it.
 10. Explain that the private heuristic is only a low-accuracy fallback if the selected model fails.
 
 ## Suggested Generic Test Memory
@@ -50,8 +50,8 @@ Expected warnings:
 ```text
 story text
   -> extraction provider
-      -> optional local Ollama LLM
-      -> optional OpenAI-compatible API
+      -> optional Ollama API
+      -> optional OpenAI API
       -> optional Gemini API
       -> optional Claude API
       -> private heuristic fallback on failure

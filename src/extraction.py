@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -22,6 +23,7 @@ from src.providers import (
     build_provider_debug,
     call_claude,
     call_gemini,
+    call_model_for_json,
     call_ollama,
     call_openai_compatible,
     parse_json_object,
@@ -34,6 +36,106 @@ from src.utils import clean_name, summarize_exception, trim_value
 # ---------------------------------------------------------------------------
 # Top-level extraction orchestration
 # ---------------------------------------------------------------------------
+
+
+def infer_scene_metadata(
+    text: str,
+    provider: ProviderConfig,
+) -> tuple[dict[str, Any], str, str]:
+    raw = ""
+    try:
+        raw = call_model_for_json(scene_metadata_system_prompt(), scene_metadata_user_prompt(text), provider)
+        payload = parse_json_object(raw)
+        scene = payload.get("scene", payload) if isinstance(payload, dict) else {}
+        metadata = normalize_inferred_scene_metadata(scene)
+        return metadata, "Inferred scene details from the text.", ""
+    except Exception as exc:
+        metadata = heuristic_scene_metadata(text)
+        debug = build_provider_debug(exc, provider, {}, text, raw)
+        return metadata, f"Scene details used local fallback ({summarize_exception(exc)}).", debug
+
+
+def scene_metadata_system_prompt() -> str:
+    return (
+        "You infer scene-level metadata for fiction editing. "
+        "Return only JSON with a top-level key named scene. "
+        "Use only details explicitly present or strongly implied by headings, labels, or narration. "
+        "Do not invent chapter numbers, locations, story time, or point of view."
+    )
+
+
+def scene_metadata_user_prompt(text: str) -> str:
+    schema = {
+        "scene": {
+            "source": "short title/source label if explicit, else empty string",
+            "chapter": "integer if explicit, else null",
+            "story_order": "integer if explicit timeline/order is clear, else null",
+            "scene_time": "short in-story time label if explicit, else empty string",
+            "location": "primary scene location if explicit, else empty string",
+            "pov": "point-of-view character if explicit or strongly implied, else empty string",
+        }
+    }
+    return (
+        "Infer these scene details for the text below. "
+        "Use null for unknown numeric fields and empty strings for unknown text fields. "
+        "For POV, prefer an explicitly named POV label; otherwise infer only if the narration clearly centers one character.\n\n"
+        f"Return JSON matching this shape:\n{json.dumps(schema, indent=2)}\n\n"
+        f"Text:\n{text[:12000]}"
+    )
+
+
+def normalize_inferred_scene_metadata(scene: Any) -> dict[str, Any]:
+    if not isinstance(scene, dict):
+        scene = {}
+    chapter = nullable_int(scene.get("chapter"))
+    story_order = nullable_int(scene.get("story_order"))
+    return {
+        "source": trim_value(str(scene.get("source") or ""), 80),
+        "chapter": chapter,
+        "story_order": story_order,
+        "scene_time": trim_value(str(scene.get("scene_time") or ""), 80),
+        "location": trim_value(str(scene.get("location") or ""), 80),
+        "pov": trim_value(str(scene.get("pov") or ""), 80),
+    }
+
+
+def nullable_int(value: Any) -> int | None:
+    if value in ("", None):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def heuristic_scene_metadata(text: str) -> dict[str, Any]:
+    chapter = None
+    chapter_match = re.search(r"\bchapter\s+(?P<chapter>\d+)\b", text, re.IGNORECASE)
+    if chapter_match:
+        chapter = int(chapter_match.group("chapter"))
+
+    scene_time = ""
+    time_match = re.search(
+        r"\b(?:day|night|morning|evening|winter|spring|summer|autumn|fall)\b(?:\s+\d+)?",
+        text,
+        re.IGNORECASE,
+    )
+    if time_match:
+        scene_time = trim_value(time_match.group(0), 80)
+
+    location = ""
+    location_match = re.search(r"\b(?:at|in|inside|outside)\s+the\s+([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*){0,3})", text)
+    if location_match:
+        location = clean_name(location_match.group(1))
+
+    return {
+        "source": "",
+        "chapter": chapter,
+        "story_order": chapter,
+        "scene_time": scene_time,
+        "location": location,
+        "pov": "",
+    }
 
 
 def extract_facts_for_text(
@@ -90,7 +192,7 @@ def extract_facts(
     raw = ""
     source = provider_source_label(provider)
     try:
-        if provider.mode == "Ollama local LLM":
+        if provider.mode == "Ollama API":
             raw = call_ollama(text, metadata, provider)
         elif provider.mode == "Gemini API":
             raw = call_gemini(text, metadata, provider)

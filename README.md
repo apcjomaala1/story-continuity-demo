@@ -14,13 +14,15 @@ LoreLock is no longer seeded with a specific story. You paste or upload story ma
 
 ## AI Provider Options
 
-- **Ollama local LLM**: sends selected text to a local Ollama server, such as `llama3.2:3b`. Better extraction while keeping drafts local, but may be slow on weak hardware.
-- **Gemini API**: sends selected text to Google's Gemini API. Useful for stronger extraction when privacy constraints allow it.
-- **Claude API**: sends selected text to Anthropic's Claude API. Useful for stronger extraction when privacy constraints allow it.
-- **OpenAI-compatible API**: sends selected text to an external API endpoint. Better extraction, weaker privacy. Only use this deliberately.
+- **Ollama API**: sends selected text to the configured Ollama API endpoint.
+- **Gemini API**: sends selected text to the configured Gemini API endpoint.
+- **Claude API**: sends selected text to the configured Claude API endpoint.
+- **OpenAI API**: sends selected text to the configured OpenAI API endpoint.
 - **Private heuristic fallback**: only used if the selected provider fails and fallback is enabled. It is low accuracy and not the intended primary extractor.
 
 The continuity checker itself is deterministic and explainable. The LLM, if enabled, is used for extraction rather than final judgment.
+
+The OpenAI API option uses the OpenAI chat completions request shape. If another provider accepts that same request shape, enter that provider's base URL in the OpenAI API base URL field.
 
 Provider choices, endpoint URLs, model names, fallback preference, and API key fields are persisted locally in `data/provider_settings.json`. That file is gitignored.
 

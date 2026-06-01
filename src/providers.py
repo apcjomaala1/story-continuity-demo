@@ -11,6 +11,7 @@ from src.constants import (
     DATA_DIR,
     EXCERPT_PROFILES,
     PROVIDER_BASE_URL_KEYS,
+    PROVIDER_MODE_ALIASES,
     PROVIDER_MODES,
     PROVIDER_SETTINGS_FILE,
     ProviderConfig,
@@ -27,13 +28,13 @@ def suggested_char_limit(provider: ProviderConfig) -> int:
 
 
 def provider_source_label(provider: ProviderConfig) -> str:
-    if provider.mode == "Ollama local LLM":
+    if provider.mode == "Ollama API":
         return f"ollama:{provider.ollama_model}"
     if provider.mode == "Gemini API":
         return f"gemini:{provider.gemini_model}"
     if provider.mode == "Claude API":
         return f"claude:{provider.claude_model}"
-    return f"api:{provider.api_model}"
+    return f"openai:{provider.api_model}"
 
 
 # ---------------------------------------------------------------------------
@@ -42,95 +43,118 @@ def provider_source_label(provider: ProviderConfig) -> str:
 
 
 def call_ollama(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
+    return call_model_for_json(
+        extraction_system_prompt(provider),
+        extraction_user_prompt(text, metadata, provider),
+        provider,
+    )
+
+
+def call_model_for_json(system_prompt: str, user_prompt: str, provider: ProviderConfig) -> str:
     profile = excerpt_profile(provider)
-    body = {
-        "model": provider.ollama_model,
-        "stream": False,
-        "format": "json",
-        "messages": [
-            {"role": "system", "content": extraction_system_prompt(provider)},
-            {"role": "user", "content": extraction_user_prompt(text, metadata, provider)},
-        ],
-        "options": {
+    if provider.mode == "Ollama API":
+        body = {
+            "model": provider.ollama_model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "options": {
+                "temperature": profile["temperature"],
+                "num_predict": profile["max_output_tokens"],
+            },
+        }
+        return post_json(f"{provider.ollama_url}/api/chat", body)["message"]["content"]
+
+    if provider.mode == "Gemini API":
+        if not provider.gemini_key:
+            raise ValueError("Gemini API key is missing")
+
+        body = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": f"{system_prompt}\n\n{user_prompt}"
+                        }
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "temperature": profile["temperature"],
+                "maxOutputTokens": profile["max_output_tokens"],
+                "responseMimeType": "application/json",
+            },
+        }
+        url = f"{provider.gemini_url}/models/{provider.gemini_model}:generateContent"
+        response = post_json(url, body, {"x-goog-api-key": provider.gemini_key})
+        return response["candidates"][0]["content"]["parts"][0]["text"]
+
+    if provider.mode == "Claude API":
+        if not provider.claude_key:
+            raise ValueError("Claude API key is missing")
+
+        body = {
+            "model": provider.claude_model,
+            "max_tokens": profile["max_output_tokens"],
             "temperature": profile["temperature"],
-            "num_predict": profile["max_output_tokens"],
-        },
-    }
-    return post_json(f"{provider.ollama_url}/api/chat", body)["message"]["content"]
+            "system": system_prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                }
+            ],
+        }
+        headers = {
+            "x-api-key": provider.claude_key,
+            "anthropic-version": "2023-06-01",
+        }
+        response = post_json(f"{provider.claude_url}/messages", body, headers)
+        return "".join(block.get("text", "") for block in response.get("content", []) if block.get("type") == "text")
 
-
-def call_gemini(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
-    if not provider.gemini_key:
-        raise ValueError("Gemini API key is missing")
-
-    profile = excerpt_profile(provider)
-    body = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            f"{extraction_system_prompt(provider)}\n\n"
-                            f"{extraction_user_prompt(text, metadata, provider)}"
-                        )
-                    }
-                ],
-            }
-        ],
-        "generationConfig": {
-            "temperature": profile["temperature"],
-            "maxOutputTokens": profile["max_output_tokens"],
-            "responseMimeType": "application/json",
-        },
-    }
-    url = f"{provider.gemini_url}/models/{provider.gemini_model}:generateContent"
-    response = post_json(url, body, {"x-goog-api-key": provider.gemini_key})
-    return response["candidates"][0]["content"]["parts"][0]["text"]
-
-
-def call_claude(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
-    if not provider.claude_key:
-        raise ValueError("Claude API key is missing")
-
-    profile = excerpt_profile(provider)
-    body = {
-        "model": provider.claude_model,
-        "max_tokens": profile["max_output_tokens"],
-        "temperature": profile["temperature"],
-        "system": extraction_system_prompt(provider),
-        "messages": [
-            {
-                "role": "user",
-                "content": extraction_user_prompt(text, metadata, provider),
-            }
-        ],
-    }
-    headers = {
-        "x-api-key": provider.claude_key,
-        "anthropic-version": "2023-06-01",
-    }
-    response = post_json(f"{provider.claude_url}/messages", body, headers)
-    return "".join(block.get("text", "") for block in response.get("content", []) if block.get("type") == "text")
-
-
-def call_openai_compatible(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
     if not provider.api_key:
-        raise ValueError("API key is missing")
+        raise ValueError("OpenAI API key is missing")
 
-    profile = excerpt_profile(provider)
     body = {
         "model": provider.api_model,
         "temperature": profile["temperature"],
         "max_tokens": profile["max_output_tokens"],
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": extraction_system_prompt(provider)},
-            {"role": "user", "content": extraction_user_prompt(text, metadata, provider)},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ],
     }
     headers = {"Authorization": f"Bearer {provider.api_key}"}
     return post_json(f"{provider.api_url}/chat/completions", body, headers)["choices"][0]["message"]["content"]
+
+
+def call_gemini(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
+    return call_model_for_json(
+        extraction_system_prompt(provider),
+        extraction_user_prompt(text, metadata, provider),
+        provider,
+    )
+
+
+def call_claude(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
+    return call_model_for_json(
+        extraction_system_prompt(provider),
+        extraction_user_prompt(text, metadata, provider),
+        provider,
+    )
+
+
+def call_openai_compatible(text: str, metadata: dict[str, Any], provider: ProviderConfig) -> str:
+    return call_model_for_json(
+        extraction_system_prompt(provider),
+        extraction_user_prompt(text, metadata, provider),
+        provider,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +434,7 @@ def env_or_default(name: str, default: str) -> str:
 
 def default_provider_settings() -> dict[str, Any]:
     return {
-        "mode": "Ollama local LLM",
+        "mode": "Ollama API",
         "extraction_depth": "Normal scene/chapter excerpt",
         "ollama_url": "http://localhost:11434",
         "ollama_model": "llama3.2:3b",
@@ -453,6 +477,7 @@ def load_provider_settings_from_disk() -> dict[str, Any]:
 
 def normalized_provider_settings(settings: dict[str, Any]) -> dict[str, Any]:
     defaults = default_provider_settings()
+    settings["mode"] = PROVIDER_MODE_ALIASES.get(settings["mode"], settings["mode"])
     if settings["mode"] not in PROVIDER_MODES:
         settings["mode"] = defaults["mode"]
     if settings["extraction_depth"] not in EXCERPT_PROFILES:
@@ -508,8 +533,11 @@ def ensure_provider_settings_state() -> None:
         if not str(st.session_state.get(state_key, "")).strip():
             st.session_state[state_key] = defaults[key]
 
-    if st.session_state.get("provider_mode") not in PROVIDER_MODES:
+    mode = PROVIDER_MODE_ALIASES.get(st.session_state.get("provider_mode"), st.session_state.get("provider_mode"))
+    if mode not in PROVIDER_MODES:
         st.session_state.provider_mode = defaults["mode"]
+    else:
+        st.session_state.provider_mode = mode
     if st.session_state.get("provider_extraction_depth") not in EXCERPT_PROFILES:
         st.session_state.provider_extraction_depth = defaults["extraction_depth"]
 
