@@ -10,6 +10,7 @@ from src.constants import (
     APP_DIR,
     DATA_DIR,
     EXCERPT_PROFILES,
+    FACT_TYPES,
     MEMORY_FILE,
     PROVIDER_BASE_URL_KEYS,
     PROVIDER_MODES,
@@ -18,6 +19,7 @@ from src.constants import (
 )
 from src.continuity import check_continuity
 from src.extraction import extract_facts_for_text
+from src.extraction import infer_scene_metadata
 from src.facts import normalize_facts
 from src.providers import (
     current_provider_settings,
@@ -45,7 +47,7 @@ def main() -> None:
     ensure_state()
 
     st.title("LoreLock")
-    st.caption("A generic story continuity agent with private-first memory extraction.")
+    st.caption("A quiet continuity desk for scenes, chapters, character notes, and lore.")
 
     provider = render_provider_sidebar()
     tabs = st.tabs(["Scene Review", "Memory Graph", "Privacy"])
@@ -62,17 +64,60 @@ def apply_compact_styles() -> None:
     st.markdown(
         """
         <style>
+        h1, h2, h3 {
+            letter-spacing: 0;
+        }
+
+        h1 {
+            font-size: 2.45rem !important;
+            margin-bottom: 0.1rem !important;
+        }
+
+        h3 {
+            margin-top: 0.4rem !important;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.35rem;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 8px 8px 0 0;
+            font-weight: 650;
+        }
+
         [data-testid="stTextArea"] textarea {
-            font-size: 0.82rem !important;
-            line-height: 1.38 !important;
+            border-radius: 8px;
+            font-size: 0.95rem !important;
+            line-height: 1.55 !important;
         }
 
         [data-testid="stTextArea"] label p {
-            font-size: 0.86rem !important;
+            font-size: 0.9rem !important;
+            font-weight: 650;
         }
 
         [data-testid="stAlert"] {
-            font-size: 0.86rem !important;
+            border-radius: 8px;
+            font-size: 0.9rem !important;
+        }
+
+        [data-testid="stMetric"] {
+            border-radius: 8px;
+            padding: 0.7rem 0.8rem;
+        }
+
+        .stButton button,
+        .stDownloadButton button,
+        [data-testid="stFormSubmitButton"] button {
+            border-radius: 8px;
+            font-weight: 650;
+        }
+
+        [data-baseweb="input"] input,
+        [data-baseweb="select"] > div,
+        [data-baseweb="textarea"] textarea {
+            border-radius: 8px;
         }
         </style>
         """,
@@ -87,6 +132,9 @@ def ensure_state() -> None:
     st.session_state.setdefault("issues", [])
     st.session_state.setdefault("provider_notice", "")
     st.session_state.setdefault("provider_debug", "")
+    st.session_state.setdefault("scene_metadata", {})
+    st.session_state.setdefault("metadata_notice", "")
+    st.session_state.setdefault("metadata_debug", "")
     ensure_provider_settings_state()
 
 
@@ -134,27 +182,27 @@ def render_model_selector(
 
 def render_provider_sidebar() -> ProviderConfig:
     with st.sidebar:
-        st.header("AI Provider")
+        st.header("Writing Assistant")
         mode = st.selectbox(
-            "Extraction mode",
+            "Reading engine",
             PROVIDER_MODES,
             key="provider_mode",
-            help="The provider extracts candidate story facts. Continuity checks remain deterministic.",
+            help="This reads the selected story text and suggests facts. Continuity checks still run inside LoreLock.",
         )
         extraction_depth = st.selectbox(
-            "Extraction depth",
+            "How closely should it read?",
             list(EXCERPT_PROFILES.keys()),
             key="provider_extraction_depth",
             format_func=lambda key: EXCERPT_PROFILES[key]["label"],
-            help="Choose how deep the extractor should look. The app then suggests a matching excerpt length.",
+            help="Choose how much detail the reader should look for. LoreLock suggests a matching excerpt length.",
         )
         profile = EXCERPT_PROFILES[extraction_depth]
         st.caption(f"Suggested excerpt: {profile['recommended_chars']:,} chars")
         st.info(profile["guidance"])
 
-        if mode == "Ollama local LLM":
-            st.info("Text is sent to a local Ollama server only.")
-            ollama_url = st.text_input("Ollama URL", key="provider_ollama_url")
+        if mode == "Ollama API":
+            st.info("Selected text is sent to the configured Ollama API endpoint.")
+            ollama_url = st.text_input("Ollama API base URL", key="provider_ollama_url")
             render_model_selector(
                 "Ollama model",
                 setting_key="provider_ollama_model",
@@ -162,7 +210,7 @@ def render_provider_sidebar() -> ProviderConfig:
                 fetch_models=lambda: fetch_ollama_models(ollama_url),
             )
         elif mode == "Gemini API":
-            st.warning("Gemini mode sends selected story text to Google's Gemini API.")
+            st.info("Selected text is sent to the configured Gemini API endpoint.")
             gemini_url = st.text_input("Gemini API base URL", key="provider_gemini_url")
             gemini_key = st.text_input("Gemini API key", type="password", key="provider_gemini_key")
             render_model_selector(
@@ -172,7 +220,7 @@ def render_provider_sidebar() -> ProviderConfig:
                 fetch_models=lambda: fetch_gemini_models(gemini_url, gemini_key),
             )
         elif mode == "Claude API":
-            st.warning("Claude mode sends selected story text to Anthropic's Claude API.")
+            st.info("Selected text is sent to the configured Claude API endpoint.")
             claude_url = st.text_input("Claude API base URL", key="provider_claude_url")
             claude_key = st.text_input("Claude API key", type="password", key="provider_claude_key")
             render_model_selector(
@@ -182,11 +230,11 @@ def render_provider_sidebar() -> ProviderConfig:
                 fetch_models=lambda: fetch_claude_models(claude_url, claude_key),
             )
         else:
-            st.warning("API mode sends selected story text to an external service.")
-            api_url = st.text_input("API base URL", key="provider_api_url")
-            api_key = st.text_input("API key", type="password", key="provider_api_key")
+            st.info("Selected text is sent to the configured OpenAI API endpoint.")
+            api_url = st.text_input("OpenAI API base URL", key="provider_api_url")
+            api_key = st.text_input("OpenAI API key", type="password", key="provider_api_key")
             render_model_selector(
-                "Model",
+                "OpenAI model",
                 setting_key="provider_api_model",
                 cache_key="api",
                 fetch_models=lambda: fetch_openai_compatible_models(api_url, api_key),
@@ -209,19 +257,19 @@ def render_provider_sidebar() -> ProviderConfig:
 
         st.caption(
             f"Provider settings are saved locally to `{_settings_file.name}`. "
-            "Privacy is controlled by the extraction provider."
+            "Text routing is controlled by the selected reading engine."
         )
         fallback_to_heuristic = st.checkbox(
-            "Use private heuristic fallback if extraction provider fails",
+            "Use private backup reader if the selected reader fails",
             key="provider_fallback_to_heuristic",
-            help="The heuristic fallback is low accuracy. It exists only so the demo can still run when a model is unavailable.",
+            help="This backup is less accurate. It exists so the demo can still run when a model is unavailable.",
         )
 
         st.divider()
-        st.metric("Approved facts", len(st.session_state.memory))
-        if st.button("Load saved memory", use_container_width=True):
+        st.metric("Story facts saved", len(st.session_state.memory))
+        if st.button("Load saved story memory", use_container_width=True):
             load_memory_from_disk()
-        if st.button("Save memory locally", use_container_width=True):
+        if st.button("Save story memory locally", use_container_width=True):
             save_memory_to_disk()
 
     provider = ProviderConfig(
@@ -316,44 +364,45 @@ def render_chunking_option(key: str, text: str, provider: ProviderConfig) -> boo
 
 
 def render_scene_review_tab(provider: ProviderConfig) -> None:
-    st.subheader("Scene Review")
+    st.subheader("Review a Scene")
     st.write(
         "Paste a chapter, scene, outline, character sheet, or lore note. "
-        "LoreLock extracts candidate facts, checks them against approved memory, "
-        "and lets you approve what should become canon."
+        "LoreLock pulls out possible story facts, checks them against what you have approved, "
+        "and lets you decide what becomes canon."
     )
 
-    meta_col, text_col = st.columns([0.34, 0.66], gap="large")
-    with meta_col:
-        metadata = render_metadata_form("review", default_source="draft scene")
-        uploaded = st.file_uploader("Optional text file", type=["txt", "md"])
-
+    uploaded = st.file_uploader("Optional draft file", type=["txt", "md"])
     uploaded_text = ""
     seed_token = ""
+    default_source = "draft scene"
     if uploaded is not None:
         uploaded_text = uploaded.getvalue().decode("utf-8", errors="replace")
-        metadata["source"] = uploaded.name
+        default_source = uploaded.name
         seed_token = f"{uploaded.name}:{len(uploaded_text)}"
 
-    with text_col:
-        text = render_live_textarea(
-            "Scene or source text",
-            value=uploaded_text,
-            placeholder="Paste the story material you want to review.",
-            key="review_text_live",
-            provider=provider,
-            seed_token=seed_token,
-        )
-        split_over_limit = render_chunking_option("review_text_live", text, provider)
+    text = render_live_textarea(
+        "Scene or source text",
+        value=uploaded_text,
+        placeholder="Paste the scene, chapter, outline, character sheet, or lore note you want checked.",
+        key="review_text_live",
+        provider=provider,
+        seed_token=seed_token,
+    )
+    split_over_limit = render_chunking_option("review_text_live", text, provider)
 
-    if st.button("Extract, check, and stage facts", type="primary", use_container_width=True):
+    with st.expander("Scene details and optional overrides", expanded=False):
+        render_scene_metadata_summary(st.session_state.scene_metadata)
+        overrides = render_metadata_form("review", default_source=default_source)
+
+    if st.button("Review this text", type="primary", use_container_width=True):
         if not text.strip():
             st.error("Paste or upload story text first.")
         else:
-            with st.spinner("Extracting facts and checking continuity..."):
-                facts, issues, notice, debug = review_text_against_memory(
+            with st.spinner("Reading the text, finding scene details, and checking continuity..."):
+                facts, issues, notice, debug, metadata = review_text_against_memory(
                     text,
-                    metadata,
+                    overrides,
+                    default_source,
                     provider,
                     st.session_state.memory,
                     split_over_limit=split_over_limit,
@@ -363,135 +412,182 @@ def render_scene_review_tab(provider: ProviderConfig) -> None:
             st.session_state.issues = issues
             st.session_state.provider_notice = notice
             st.session_state.provider_debug = debug
+            st.session_state.scene_metadata = metadata
 
     render_provider_feedback("review")
 
-    warning_col, candidate_col = st.columns([0.52, 0.48], gap="large")
-    with warning_col:
-        render_continuity_warnings()
-    with candidate_col:
-        render_candidate_facts()
+    with st.expander(f"Continuity notes ({len(st.session_state.issues)})", expanded=bool(st.session_state.issues)):
+        render_continuity_warnings(show_header=False)
+    with st.expander(f"Possible story facts ({len(st.session_state.candidates)})", expanded=bool(st.session_state.candidates)):
+        render_candidate_facts(show_header=False)
 
 
 def review_text_against_memory(
     text: str,
-    metadata: dict[str, Any],
+    overrides: dict[str, Any],
+    default_source: str,
     provider: ProviderConfig,
     memory: list[dict[str, Any]],
     *,
     split_over_limit: bool,
-) -> tuple[list[dict[str, Any]], list[ContinuityIssue], str, str]:
+) -> tuple[list[dict[str, Any]], list[ContinuityIssue], str, str, dict[str, Any]]:
+    inferred_metadata, metadata_notice, metadata_debug = infer_scene_metadata(text, provider)
+    metadata = merge_scene_metadata(default_source, inferred_metadata, overrides)
     facts, notice, debug = extract_facts_for_text(text, metadata, provider, split_over_limit=split_over_limit)
     issues = check_continuity(text, facts, memory) if memory else []
-    return facts, issues, notice, debug
+    combined_notice = " ".join(part for part in [metadata_notice, notice] if part)
+    combined_debug = "\n\n".join(part for part in [metadata_debug, debug] if part)
+    return facts, issues, combined_notice, combined_debug, metadata
 
 
 def render_metadata_form(prefix: str, default_source: str) -> dict[str, Any]:
+    st.caption("Leave these blank and LoreLock will infer what it can from the pasted text.")
     source = st.text_input("Source label", value=default_source, key=f"{prefix}_source")
-    chapter = st.number_input("Narrative chapter", min_value=0, max_value=9999, value=1, key=f"{prefix}_chapter")
-    story_order = st.number_input(
-        "Story order index",
-        min_value=0,
-        max_value=999999,
-        value=int(chapter),
+    chapter = st.text_input("Chapter override", value="", placeholder="Auto", key=f"{prefix}_chapter")
+    story_order = st.text_input(
+        "Timeline order override",
+        value="",
+        placeholder="Auto",
         key=f"{prefix}_story_order",
         help="Use this for flashbacks or nonlinear stories. Earlier in-world events should have lower numbers.",
     )
-    scene_time = st.text_input("Story time", value="", placeholder="Day 4, three years later, winter, etc.", key=f"{prefix}_time")
+    scene_time = st.text_input("Story time override", value="", placeholder="Auto", key=f"{prefix}_time")
     location = st.text_input("Location", value="", key=f"{prefix}_location")
     pov = st.text_input("POV character", value="", key=f"{prefix}_pov")
     return {
-        "source": source.strip() or default_source,
-        "chapter": int(chapter),
-        "story_order": int(story_order),
+        "source": source.strip(),
+        "chapter": chapter.strip(),
+        "story_order": story_order.strip(),
         "scene_time": scene_time.strip(),
         "location": location.strip(),
         "pov": pov.strip(),
     }
 
 
-def render_candidate_facts() -> None:
+def merge_scene_metadata(default_source: str, inferred: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    chapter = first_int(overrides.get("chapter"), inferred.get("chapter"), 1)
+    story_order = first_int(overrides.get("story_order"), inferred.get("story_order"), chapter)
+    return {
+        "source": first_text(overrides.get("source"), inferred.get("source"), default_source),
+        "chapter": chapter,
+        "story_order": story_order,
+        "scene_time": first_text(overrides.get("scene_time"), inferred.get("scene_time"), ""),
+        "location": first_text(overrides.get("location"), inferred.get("location"), ""),
+        "pov": first_text(overrides.get("pov"), inferred.get("pov"), ""),
+    }
+
+
+def first_text(*values: Any) -> str:
+    for value in values:
+        text = as_text(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def first_int(*values: Any) -> int:
+    for value in values:
+        try:
+            if value not in ("", None):
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def render_scene_metadata_summary(metadata: dict[str, Any]) -> None:
+    if not metadata:
+        st.info("Scene details will be inferred when you review the text.")
+        return
+
+    labels = {
+        "source": "Source",
+        "chapter": "Chapter",
+        "story_order": "Timeline order",
+        "scene_time": "Story time",
+        "location": "Location",
+        "pov": "POV",
+    }
+    for key, label in labels.items():
+        value = metadata.get(key)
+        if value not in ("", None):
+            st.caption(f"{label}: {value}")
+
+
+def render_candidate_facts(*, show_header: bool = True) -> None:
     candidates = st.session_state.candidates
     if not candidates:
         st.info("No candidate facts extracted yet.")
         return
 
-    st.subheader(f"Canonical Candidate Facts: {len(candidates)}")
-    with st.form("approve_candidates"):
-        approved_ids = []
-        for fact in candidates:
-            label = fact_label(fact)
-            checked = st.checkbox(label, value=True, key=f"approve_{fact['id']}")
-            with st.expander("Evidence and metadata", expanded=False):
-                st.json(fact)
-            if checked:
-                approved_ids.append(fact["id"])
+    if show_header:
+        st.subheader(f"Possible story facts: {len(candidates)}")
+    st.caption("Edit these suggestions before adding them. Delete rows you do not want, or uncheck Add.")
 
-        submitted = st.form_submit_button("Add approved facts to memory", type="primary")
+    rows = [fact_to_editor_row(fact, include_add=True) for fact in candidates]
+    edited_rows = st.data_editor(
+        rows,
+        hide_index=True,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="candidate_fact_editor",
+        column_config=fact_editor_columns(include_add=True),
+        disabled=["id", "label"],
+    )
+    edited_facts = editor_rows_to_facts(edited_rows, st.session_state.scene_metadata)
+    st.session_state.candidates = edited_facts
 
-    if submitted:
+    if st.button("Add selected facts to story memory", type="primary", use_container_width=True):
         existing_ids = {fact["id"] for fact in st.session_state.memory}
+        edited_by_id = {fact["id"]: fact for fact in edited_facts}
         selected = [
             fact
-            for fact in candidates
-            if fact["id"] in approved_ids and fact["id"] not in existing_ids
+            for row in editor_rows(edited_rows)
+            if row.get("add") and (fact := edited_by_id.get(as_text(row.get("id")))) and fact["id"] not in existing_ids
         ]
         st.session_state.memory.extend(selected)
-        st.success(f"Added {len(selected)} fact(s) to memory.")
+        st.success(f"Added {len(selected)} fact(s) to story memory.")
 
 
 def render_memory_tab() -> None:
-    st.subheader("Approved Story Memory")
+    st.subheader("Story Memory")
     memory = st.session_state.memory
 
     if not memory:
-        st.info("Memory is empty. Review story text first or import JSON below.")
+        st.info("Story memory is empty. Review story text first or import JSON below.")
     else:
-        rows = [
-            {
-                "id": fact["id"],
-                "type": fact["type"],
-                "subject": fact["subject"],
-                "predicate": fact["predicate"],
-                "object": fact["object"],
-                "value": fact["value"],
-                "relation_type": fact.get("relation_type", ""),
-                "relation_dimension": fact.get("relation_dimension", ""),
-                "chapter": fact["chapter"],
-                "story_order": fact["story_order"],
-                "source": fact["source"],
-            }
-            for fact in memory
-        ]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
-
-        labels = [fact_label(fact) for fact in memory]
-        selected = st.multiselect("Facts to remove", labels)
-        if st.button("Remove selected facts"):
-            st.session_state.memory = [
-                fact
-                for fact in memory
-                if fact_label(fact) not in selected
-            ]
-            st.rerun()
+        st.caption("Edit cells directly. Delete a row from the table to remove that fact from memory.")
+        edited_rows = st.data_editor(
+            [fact_to_editor_row(fact) for fact in memory],
+            hide_index=True,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="memory_fact_editor",
+            column_config=fact_editor_columns(),
+            disabled=["id", "label"],
+        )
+        edited_memory = editor_rows_to_facts(edited_rows, {})
+        if facts_signature(edited_memory) != facts_signature(st.session_state.memory):
+            st.session_state.memory = edited_memory
+            memory = st.session_state.memory
 
     st.divider()
     st.download_button(
-        "Download memory JSON",
+        "Download story memory JSON",
         data=json.dumps(memory, indent=2, ensure_ascii=False),
         file_name="lorelock_memory.json",
         mime="application/json",
         use_container_width=True,
     )
 
-    imported = st.file_uploader("Import memory JSON", type=["json"], key="memory_import")
-    if imported is not None and st.button("Load imported memory"):
+    imported = st.file_uploader("Import story memory JSON", type=["json"], key="memory_import")
+    if imported is not None and st.button("Load imported story memory"):
         data = json.loads(imported.getvalue().decode("utf-8"))
         st.session_state.memory = normalize_facts(data if isinstance(data, list) else data.get("facts", []), {})
         st.success(f"Loaded {len(st.session_state.memory)} fact(s).")
 
     raw_json = st.text_area(
-        "Manual JSON editor",
+        "Advanced: edit memory JSON directly",
         value=json.dumps(memory, indent=2, ensure_ascii=False),
         height=260,
     )
@@ -504,37 +600,172 @@ def render_memory_tab() -> None:
             st.error(f"Invalid JSON: {exc}")
 
 
-def render_continuity_warnings() -> None:
-    st.markdown(f"#### Continuity Warnings: {len(st.session_state.issues)}")
+def fact_to_editor_row(fact: dict[str, Any], *, include_add: bool = False) -> dict[str, Any]:
+    row = {
+        "label": fact_label(fact),
+        "id": fact.get("id", ""),
+        "type": fact.get("type", ""),
+        "subject": fact.get("subject", ""),
+        "predicate": fact.get("predicate", ""),
+        "object": fact.get("object", ""),
+        "value": fact.get("value", ""),
+        "known_by": ", ".join(as_text(item) for item in fact.get("known_by", [])),
+        "chapter": fact.get("chapter", 0),
+        "story_order": fact.get("story_order", 0),
+        "scene_time": fact.get("scene_time", ""),
+        "location": fact.get("location", ""),
+        "pov": fact.get("pov", ""),
+        "source": fact.get("source", ""),
+        "evidence": fact.get("evidence", ""),
+        "confidence": fact.get("confidence", 0.7),
+        "extraction": fact.get("extraction", ""),
+        "relation_type": fact.get("relation_type", ""),
+        "relation_dimension": fact.get("relation_dimension", ""),
+    }
+    if include_add:
+        row = {"add": True, **row}
+    return row
+
+
+def fact_editor_columns(*, include_add: bool = False) -> dict[str, Any]:
+    columns: dict[str, Any] = {
+        "label": st.column_config.TextColumn("Fact", width="large", help="Readable summary; generated from the editable fields."),
+        "id": st.column_config.TextColumn("ID", width="small"),
+        "type": st.column_config.SelectboxColumn("Type", options=FACT_TYPES),
+        "subject": st.column_config.TextColumn("Subject", width="medium"),
+        "predicate": st.column_config.TextColumn("Predicate", width="medium"),
+        "object": st.column_config.TextColumn("Object", width="medium"),
+        "value": st.column_config.TextColumn("Value", width="medium"),
+        "known_by": st.column_config.TextColumn("Known by", width="medium"),
+        "chapter": st.column_config.NumberColumn("Chapter", min_value=0, step=1),
+        "story_order": st.column_config.NumberColumn("Timeline", min_value=0, step=1),
+        "scene_time": st.column_config.TextColumn("Story time", width="medium"),
+        "location": st.column_config.TextColumn("Location", width="medium"),
+        "pov": st.column_config.TextColumn("POV", width="medium"),
+        "source": st.column_config.TextColumn("Source", width="medium"),
+        "evidence": st.column_config.TextColumn("Evidence", width="large"),
+        "confidence": st.column_config.NumberColumn("Confidence", min_value=0.0, max_value=1.0, step=0.05),
+        "extraction": st.column_config.TextColumn("Reader", width="small"),
+        "relation_type": st.column_config.TextColumn("Relation", width="small"),
+        "relation_dimension": st.column_config.TextColumn("Relation kind", width="small"),
+    }
+    if include_add:
+        return {"add": st.column_config.CheckboxColumn("Add", default=True), **columns}
+    return columns
+
+
+def editor_rows(value: Any) -> list[dict[str, Any]]:
+    if hasattr(value, "to_dict"):
+        return value.to_dict("records")
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, dict)]
+    return []
+
+
+def editor_rows_to_facts(value: Any, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_facts = []
+    for row in editor_rows(value):
+        subject = editor_text(row.get("subject"))
+        if not subject:
+            continue
+        raw_facts.append(
+            {
+                "id": editor_text(row.get("id")),
+                "type": editor_text(row.get("type")),
+                "subject": subject,
+                "predicate": editor_text(row.get("predicate")),
+                "object": editor_text(row.get("object")),
+                "value": editor_text(row.get("value")),
+                "known_by": comma_list(row.get("known_by")),
+                "chapter": row.get("chapter"),
+                "story_order": row.get("story_order"),
+                "scene_time": editor_text(row.get("scene_time")),
+                "location": editor_text(row.get("location")),
+                "pov": editor_text(row.get("pov")),
+                "source": editor_text(row.get("source")),
+                "evidence": editor_text(row.get("evidence")),
+                "confidence": row.get("confidence"),
+                "extraction": editor_text(row.get("extraction")) or "edited",
+                "relation_type": editor_text(row.get("relation_type")),
+                "relation_dimension": editor_text(row.get("relation_dimension")),
+            }
+        )
+    return normalize_facts(raw_facts, metadata, extraction_source="edited")
+
+
+def editor_text(value: Any) -> str:
+    try:
+        if value != value:
+            return ""
+    except TypeError:
+        pass
+    return as_text(value).strip()
+
+
+def comma_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [editor_text(item) for item in value if editor_text(item)]
+    return [item.strip() for item in editor_text(value).split(",") if item.strip()]
+
+
+def facts_signature(facts: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    return [
+        (
+            fact.get("id"),
+            fact.get("type"),
+            fact.get("subject"),
+            fact.get("predicate"),
+            fact.get("object"),
+            fact.get("value"),
+            tuple(fact.get("known_by", [])),
+            fact.get("chapter"),
+            fact.get("story_order"),
+            fact.get("scene_time"),
+            fact.get("location"),
+            fact.get("pov"),
+            fact.get("source"),
+            fact.get("evidence"),
+            fact.get("confidence"),
+            fact.get("extraction"),
+            fact.get("relation_type", ""),
+            fact.get("relation_dimension", ""),
+        )
+        for fact in facts
+    ]
+
+
+def render_continuity_warnings(*, show_header: bool = True) -> None:
+    if show_header:
+        st.markdown(f"#### Continuity notes: {len(st.session_state.issues)}")
     if st.session_state.issues:
         severity_rank = {"high": 0, "medium": 1, "low": 2}
         for issue in sorted(st.session_state.issues, key=lambda item: severity_rank[item.severity]):
             with st.container(border=True):
                 st.markdown(f"**{issue.category}** - `{issue.severity.upper()}`")
                 st.write(issue.message)
-                st.caption(f"Evidence: {issue.evidence}")
-                st.caption(f"Next: {issue.suggestion}")
+                st.caption(f"Where LoreLock noticed it: {issue.evidence}")
+                st.caption(f"Possible next step: {issue.suggestion}")
     elif st.session_state.scene_facts and not st.session_state.memory:
-        st.info("No approved memory yet, so this pass only extracted candidate facts.")
+        st.info("No approved story memory yet, so this pass only found possible facts.")
     else:
         st.info("No warnings yet.")
 
 
 def render_privacy_tab() -> None:
-    st.subheader("Privacy Model")
+    st.subheader("Privacy")
     st.write(
-        "LoreLock is designed so the story memory and continuity rules can run locally. "
-        "Fact extraction uses the selected model provider. The low-accuracy heuristic is only a failure fallback."
+        "LoreLock keeps your approved story memory and continuity checks local. "
+        "The selected reading engine receives the text you ask it to review so it can suggest facts."
     )
 
     st.markdown(
         """
-- **Ollama local LLM**: sends selected text to `localhost`. Good privacy if the model is local, slower on weak hardware.
-- **Gemini API**: sends selected text to Google's Gemini API.
-- **Claude API**: sends selected text to Anthropic's Claude API.
-- **OpenAI-compatible API**: sends selected text to an external model endpoint. Better extraction, weaker privacy.
-- **Private heuristic fallback**: only used when the selected model fails and fallback is enabled. Low accuracy.
-- **Extraction depth**: controls the suggested excerpt length and how many facts the extractor is asked to return.
+- **Ollama API**: sends selected text to the configured Ollama API endpoint.
+- **Gemini API**: sends selected text to the configured Gemini API endpoint.
+- **Claude API**: sends selected text to the configured Claude API endpoint.
+- **OpenAI API**: sends selected text to the configured OpenAI API endpoint.
+- **Private backup reader**: runs locally and is only used when the selected model fails and fallback is enabled.
+- **Reading depth**: controls the suggested excerpt length and how many facts the reader is asked to return.
 - **Optional splitting**: over-limit pasted text can be split into suggested-length parts, which makes one extraction call per part.
 - **Approved memory only**: extracted facts are suggestions until the writer approves them.
 - **Local saves**: saved memory goes to `data/working_memory.json`, which is gitignored.

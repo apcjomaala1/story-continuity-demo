@@ -107,26 +107,72 @@ def truncate_debug_text(value: str, limit: int) -> str:
     return f"{value[:limit]}\n\n... <truncated {omitted} chars>"
 
 
+def humanize_token(value: Any) -> str:
+    text = as_text(value).strip()
+    text = text.replace("_", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def possessive_name(value: str) -> str:
+    if not value:
+        return "This"
+    return f"{value}'" if value.endswith("s") else f"{value}'s"
+
+
 def fact_label(fact: dict[str, Any]) -> str:
     from src.facts import relationship_relation_type
 
+    subject = as_text(fact.get("subject"))
+    predicate = humanize_token(fact.get("predicate"))
+    object_ = as_text(fact.get("object"))
+    value = as_text(fact.get("value"))
+
     if fact.get("type") == "relationship":
         relation_type = relationship_relation_type(fact)
-        parts = ["relationship", fact.get("subject", "")]
+        relation = humanize_token(relation_type)
+        if subject and object_ and relation:
+            return f"{subject} is {object_}'s {relation}."
+        parts = ["Relationship", subject]
         if relation_type:
-            parts.append(relation_type)
-        if fact.get("object"):
-            parts.append(fact["object"])
-        value = fact.get("value", "")
+            parts.append(relation)
+        if object_:
+            parts.append(object_)
         if value and canonical_relationship_type(value) != relation_type:
             parts.append(f"= {value}")
         return " | ".join(part for part in parts if part)
 
-    parts = [fact.get("type", "fact"), fact.get("subject", "")]
-    if fact.get("predicate"):
-        parts.append(fact["predicate"])
-    if fact.get("object"):
-        parts.append(fact["object"])
-    if fact.get("value"):
-        parts.append(f"= {fact['value']}")
-    return " | ".join(part for part in parts if part)
+    fact_type = as_text(fact.get("type"), "fact")
+    if fact_type == "knowledge" and subject and object_:
+        return f"{subject} knows that {object_}."
+    if fact_type == "status" and subject and predicate and value:
+        return f"{possessive_name(subject)} {predicate} is {value}."
+    if fact_type == "trait" and subject and predicate and value:
+        return f"{possessive_name(subject)} {predicate} is {value}."
+    if fact_type == "ability" and subject and value:
+        return f"{subject} has ability: {value}."
+    if fact_type == "location" and subject and (object_ or value):
+        place = object_ or value
+        return f"{subject} is at {place}."
+    if fact_type == "possession" and subject and object_:
+        action = predicate or "has"
+        return f"{subject} {action} {object_}."
+    if fact_type == "event" and subject and predicate:
+        tail = f" {object_}" if object_ else ""
+        detail = f": {value}" if value and value != object_ else ""
+        return f"{subject} {predicate}{tail}{detail}."
+    if fact_type == "world_rule":
+        rule = value or object_ or subject
+        return f"World rule: {rule}."
+    if fact_type == "timeline" and subject and predicate:
+        tail = f" {object_}" if object_ else ""
+        return f"{subject} {predicate}{tail}."
+
+    parts = [humanize_token(fact_type), subject]
+    if predicate:
+        parts.append(predicate)
+    if object_:
+        parts.append(object_)
+    if value:
+        parts.append(f"= {value}")
+    label = " | ".join(part for part in parts if part)
+    return label[:1].upper() + label[1:] if label else "Fact"

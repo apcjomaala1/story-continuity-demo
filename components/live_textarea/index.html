@@ -187,16 +187,66 @@
         }
       }
 
+      function parseColor(value) {
+        const color = String(value || "").trim();
+        let match = color.match(/^#([0-9a-f]{3})$/i);
+        if (match) {
+          return match[1].split("").map(part => parseInt(part + part, 16));
+        }
+
+        match = color.match(/^#([0-9a-f]{6})$/i);
+        if (match) {
+          return [
+            parseInt(match[1].slice(0, 2), 16),
+            parseInt(match[1].slice(2, 4), 16),
+            parseInt(match[1].slice(4, 6), 16),
+          ];
+        }
+
+        match = color.match(/^rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/i);
+        if (match) {
+          return [Number(match[1]), Number(match[2]), Number(match[3])];
+        }
+
+        return null;
+      }
+
+      function luminance(color) {
+        const [red, green, blue] = color.map(channel => {
+          const normalized = channel / 255;
+          return normalized <= 0.03928
+            ? normalized / 12.92
+            : Math.pow((normalized + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      }
+
+      function themeIsDark(theme) {
+        const base = String(theme.base || "").toLowerCase();
+        if (base === "dark") {
+          return true;
+        }
+        if (base === "light") {
+          return false;
+        }
+
+        const background = parseColor(theme.backgroundColor || theme.secondaryBackgroundColor);
+        if (background) {
+          return luminance(background) < 0.42;
+        }
+
+        return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      }
+
       function applyTheme(theme) {
         if (!theme) {
           return;
         }
 
         const root = document.documentElement;
-        const base = String(theme.base || "").toLowerCase();
-        const isDark = base === "dark";
-        const text = theme.textColor || (base === "dark" ? "#f8fafc" : "#17212b");
-        const background = theme.secondaryBackgroundColor || theme.backgroundColor || (base === "dark" ? "#0f172a" : "#ffffff");
+        const isDark = themeIsDark(theme);
+        const text = theme.textColor || (isDark ? "#f8fafc" : "#17212b");
+        const background = theme.secondaryBackgroundColor || theme.backgroundColor || (isDark ? "#0f172a" : "#ffffff");
         const border = isDark ? "#334155" : "#d8dee8";
 
         root.style.colorScheme = isDark ? "dark" : "light";
