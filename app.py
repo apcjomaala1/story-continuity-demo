@@ -17,6 +17,13 @@ import streamlit.components.v1 as components
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 MEMORY_FILE = DATA_DIR / "working_memory.json"
+PROVIDER_SETTINGS_FILE = DATA_DIR / "provider_settings.json"
+PROVIDER_MODES = [
+    "Ollama local LLM",
+    "Gemini API",
+    "Claude API",
+    "OpenAI-compatible API",
+]
 LIVE_TEXTAREA = components.declare_component(
     "live_textarea",
     path=str(APP_DIR / "components" / "live_textarea"),
@@ -189,6 +196,105 @@ def ensure_state() -> None:
     st.session_state.setdefault("issues", [])
     st.session_state.setdefault("provider_notice", "")
     st.session_state.setdefault("provider_debug", "")
+    ensure_provider_settings_state()
+
+
+def default_provider_settings() -> dict[str, Any]:
+    return {
+        "mode": "Ollama local LLM",
+        "extraction_depth": "Normal scene/chapter excerpt",
+        "ollama_url": "http://localhost:11434",
+        "ollama_model": "llama3.2:3b",
+        "gemini_url": os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta"),
+        "gemini_key": os.getenv("GEMINI_API_KEY", ""),
+        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        "claude_url": os.getenv("ANTHROPIC_API_BASE", "https://api.anthropic.com/v1"),
+        "claude_key": os.getenv("ANTHROPIC_API_KEY", ""),
+        "claude_model": os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
+        "api_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "api_key": os.getenv("OPENAI_API_KEY", ""),
+        "api_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "fallback_to_heuristic": True,
+    }
+
+
+def load_provider_settings_from_disk() -> dict[str, Any]:
+    settings = default_provider_settings()
+    if not PROVIDER_SETTINGS_FILE.exists():
+        return settings
+
+    try:
+        saved = json.loads(PROVIDER_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return settings
+
+    if not isinstance(saved, dict):
+        return settings
+
+    for key, default_value in settings.items():
+        value = saved.get(key)
+        if isinstance(default_value, bool):
+            if isinstance(value, bool):
+                settings[key] = value
+        elif isinstance(value, str):
+            settings[key] = value
+
+    if settings["mode"] not in PROVIDER_MODES:
+        settings["mode"] = "Ollama local LLM"
+    if settings["extraction_depth"] not in EXCERPT_PROFILES:
+        settings["extraction_depth"] = "Normal scene/chapter excerpt"
+    return settings
+
+
+def ensure_provider_settings_state() -> None:
+    if st.session_state.get("provider_settings_initialized"):
+        return
+
+    for key, value in load_provider_settings_from_disk().items():
+        st.session_state.setdefault(f"provider_{key}", value)
+    st.session_state.provider_settings_initialized = True
+
+
+def current_provider_settings() -> dict[str, Any]:
+    settings = default_provider_settings()
+    for key, default_value in settings.items():
+        settings[key] = st.session_state.get(f"provider_{key}", default_value)
+
+    if settings["mode"] not in PROVIDER_MODES:
+        settings["mode"] = "Ollama local LLM"
+    if settings["extraction_depth"] not in EXCERPT_PROFILES:
+        settings["extraction_depth"] = "Normal scene/chapter excerpt"
+    return settings
+
+
+def provider_settings_payload(provider: ProviderConfig) -> dict[str, Any]:
+    return {
+        "mode": provider.mode,
+        "extraction_depth": provider.extraction_depth,
+        "ollama_url": provider.ollama_url,
+        "ollama_model": provider.ollama_model,
+        "gemini_url": provider.gemini_url,
+        "gemini_key": provider.gemini_key,
+        "gemini_model": provider.gemini_model,
+        "claude_url": provider.claude_url,
+        "claude_key": provider.claude_key,
+        "claude_model": provider.claude_model,
+        "api_url": provider.api_url,
+        "api_key": provider.api_key,
+        "api_model": provider.api_model,
+        "fallback_to_heuristic": provider.fallback_to_heuristic,
+    }
+
+
+def save_provider_settings_to_disk(provider: ProviderConfig) -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    content = json.dumps(provider_settings_payload(provider), indent=2, ensure_ascii=False)
+    try:
+        if PROVIDER_SETTINGS_FILE.exists() and PROVIDER_SETTINGS_FILE.read_text(encoding="utf-8") == content:
+            return
+    except OSError:
+        pass
+    PROVIDER_SETTINGS_FILE.write_text(content, encoding="utf-8")
 
 
 def render_provider_sidebar() -> ProviderConfig:
@@ -196,60 +302,61 @@ def render_provider_sidebar() -> ProviderConfig:
         st.header("AI Provider")
         mode = st.selectbox(
             "Extraction mode",
-            [
-                "Ollama local LLM",
-                "Gemini API",
-                "Claude API",
-                "OpenAI-compatible API",
-            ],
+            PROVIDER_MODES,
+            key="provider_mode",
             help="The provider extracts candidate story facts. Continuity checks remain deterministic.",
         )
         extraction_depth = st.selectbox(
             "Extraction depth",
             list(EXCERPT_PROFILES.keys()),
-            index=1,
+            key="provider_extraction_depth",
             format_func=lambda key: EXCERPT_PROFILES[key]["label"],
             help="Choose how deep the extractor should look. The app then suggests a matching excerpt length.",
         )
         profile = EXCERPT_PROFILES[extraction_depth]
         st.caption(f"Suggested excerpt: {profile['recommended_chars']:,} chars")
         st.info(profile["guidance"])
-        ollama_url = "http://localhost:11434"
-        ollama_model = "llama3.2:3b"
-        gemini_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta")
-        gemini_key = os.getenv("GEMINI_API_KEY", "")
-        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-        claude_url = os.getenv("ANTHROPIC_API_BASE", "https://api.anthropic.com/v1")
-        claude_key = os.getenv("ANTHROPIC_API_KEY", "")
-        claude_model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
-        api_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        api_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
         if mode == "Ollama local LLM":
             st.info("Text is sent to a local Ollama server only.")
-            ollama_url = st.text_input("Ollama URL", value=ollama_url)
-            ollama_model = st.text_input("Ollama model", value=ollama_model)
+            ollama_url = st.text_input("Ollama URL", key="provider_ollama_url")
+            ollama_model = st.text_input("Ollama model", key="provider_ollama_model")
         elif mode == "Gemini API":
             st.warning("Gemini mode sends selected story text to Google's Gemini API.")
-            gemini_url = st.text_input("Gemini API base URL", value=gemini_url)
-            gemini_model = st.text_input("Gemini model", value=gemini_model)
-            gemini_key = st.text_input("Gemini API key", value=gemini_key, type="password")
+            gemini_url = st.text_input("Gemini API base URL", key="provider_gemini_url")
+            gemini_model = st.text_input("Gemini model", key="provider_gemini_model")
+            gemini_key = st.text_input("Gemini API key", type="password", key="provider_gemini_key")
         elif mode == "Claude API":
             st.warning("Claude mode sends selected story text to Anthropic's Claude API.")
-            claude_url = st.text_input("Claude API base URL", value=claude_url)
-            claude_model = st.text_input("Claude model", value=claude_model)
-            claude_key = st.text_input("Claude API key", value=claude_key, type="password")
+            claude_url = st.text_input("Claude API base URL", key="provider_claude_url")
+            claude_model = st.text_input("Claude model", key="provider_claude_model")
+            claude_key = st.text_input("Claude API key", type="password", key="provider_claude_key")
         else:
             st.warning("API mode sends selected story text to an external service.")
-            api_url = st.text_input("API base URL", value=api_url)
-            api_model = st.text_input("Model", value=api_model)
-            api_key = st.text_input("API key", value=api_key, type="password")
+            api_url = st.text_input("API base URL", key="provider_api_url")
+            api_model = st.text_input("Model", key="provider_api_model")
+            api_key = st.text_input("API key", type="password", key="provider_api_key")
 
-        st.caption("Privacy is controlled by the extraction provider. Extraction depth only suggests how much context to paste.")
+        provider_values = current_provider_settings()
+        ollama_url = provider_values["ollama_url"]
+        ollama_model = provider_values["ollama_model"]
+        gemini_url = provider_values["gemini_url"]
+        gemini_key = provider_values["gemini_key"]
+        gemini_model = provider_values["gemini_model"]
+        claude_url = provider_values["claude_url"]
+        claude_key = provider_values["claude_key"]
+        claude_model = provider_values["claude_model"]
+        api_url = provider_values["api_url"]
+        api_key = provider_values["api_key"]
+        api_model = provider_values["api_model"]
+
+        st.caption(
+            f"Provider settings are saved locally to `{PROVIDER_SETTINGS_FILE.name}`. "
+            "Privacy is controlled by the extraction provider."
+        )
         fallback_to_heuristic = st.checkbox(
             "Use private heuristic fallback if extraction provider fails",
-            value=True,
+            key="provider_fallback_to_heuristic",
             help="The heuristic fallback is low accuracy. It exists only so the demo can still run when a model is unavailable.",
         )
 
@@ -260,7 +367,7 @@ def render_provider_sidebar() -> ProviderConfig:
         if st.button("Save memory locally", use_container_width=True):
             save_memory_to_disk()
 
-    return ProviderConfig(
+    provider = ProviderConfig(
         mode=mode,
         extraction_depth=extraction_depth,
         ollama_url=ollama_url.rstrip("/"),
@@ -276,10 +383,16 @@ def render_provider_sidebar() -> ProviderConfig:
         api_model=api_model.strip(),
         fallback_to_heuristic=fallback_to_heuristic,
     )
+    save_provider_settings_to_disk(provider)
+    return provider
 
 
 def excerpt_profile(provider: ProviderConfig) -> dict[str, Any]:
     return EXCERPT_PROFILES.get(provider.extraction_depth, EXCERPT_PROFILES["Normal scene/chapter excerpt"])
+
+
+def suggested_char_limit(provider: ProviderConfig) -> int:
+    return int(excerpt_profile(provider)["recommended_chars"])
 
 
 def render_live_textarea(
@@ -316,6 +429,31 @@ def render_live_textarea(
     return current_value
 
 
+def render_chunking_option(key: str, text: str, provider: ProviderConfig) -> bool:
+    limit = suggested_char_limit(provider)
+    if len(text) <= limit:
+        return False
+
+    chunks = split_text_into_chunks(text, limit)
+    sizes = ", ".join(f"{len(chunk):,}" for chunk in chunks)
+    st.warning(
+        f"This text is {len(text):,} chars; the current suggestion is {limit:,}. "
+        f"Optional splitting would make {len(chunks)} extraction calls."
+    )
+    enabled = st.checkbox(
+        "Split into suggested-length parts before extraction",
+        value=False,
+        key=f"{key}_split_over_limit",
+        help=(
+            "Keeps each part under the suggested character count and prefers newline or sentence boundaries. "
+            "This increases provider/API calls and cost."
+        ),
+    )
+    if enabled:
+        st.caption(f"Planned chunk sizes: {sizes} chars.")
+    return enabled
+
+
 def render_ingest_tab(provider: ProviderConfig) -> None:
     st.subheader("Build Story Memory")
     st.write(
@@ -344,13 +482,14 @@ def render_ingest_tab(provider: ProviderConfig) -> None:
             provider=provider,
             seed_token=seed_token,
         )
+        split_over_limit = render_chunking_option("source_text_live", text, provider)
 
     if st.button("Extract candidate memory", type="primary", use_container_width=True):
         if not text.strip():
             st.error("Paste or upload story text first.")
         else:
             with st.spinner("Extracting candidate facts..."):
-                facts, notice, debug = extract_facts(text, metadata, provider)
+                facts, notice, debug = extract_facts_for_text(text, metadata, provider, split_over_limit=split_over_limit)
             st.session_state.candidates = facts
             st.session_state.provider_notice = notice
             st.session_state.provider_debug = debug
@@ -495,20 +634,21 @@ def render_check_tab(provider: ProviderConfig) -> None:
             key="scene_text_live",
             provider=provider,
         )
+        split_over_limit = render_chunking_option("scene_text_live", scene_text, provider)
 
     if st.button("Extract and check scene", type="primary", use_container_width=True):
         if not scene_text.strip():
             st.error("Paste a scene first.")
         elif not st.session_state.memory:
             st.warning("Memory is empty. You can still extract scene facts, but there is nothing to compare against.")
-            facts, notice, debug = extract_facts(scene_text, metadata, provider)
+            facts, notice, debug = extract_facts_for_text(scene_text, metadata, provider, split_over_limit=split_over_limit)
             st.session_state.scene_facts = facts
             st.session_state.issues = []
             st.session_state.provider_notice = notice
             st.session_state.provider_debug = debug
         else:
             with st.spinner("Extracting scene facts and checking continuity..."):
-                facts, notice, debug = extract_facts(scene_text, metadata, provider)
+                facts, notice, debug = extract_facts_for_text(scene_text, metadata, provider, split_over_limit=split_over_limit)
                 issues = check_continuity(scene_text, facts, st.session_state.memory)
             st.session_state.scene_facts = facts
             st.session_state.issues = issues
@@ -557,8 +697,10 @@ def render_privacy_tab() -> None:
 - **OpenAI-compatible API**: sends selected text to an external model endpoint. Better extraction, weaker privacy.
 - **Private heuristic fallback**: only used when the selected model fails and fallback is enabled. Low accuracy.
 - **Extraction depth**: controls the suggested excerpt length and how many facts the extractor is asked to return.
+- **Optional splitting**: over-limit pasted text can be split into suggested-length parts, which makes one extraction call per part.
 - **Approved memory only**: extracted facts are suggestions until the writer approves them.
 - **Local saves**: saved memory goes to `data/working_memory.json`, which is gitignored.
+- **Provider settings**: saved provider choices, endpoints, models, and API keys go to `data/provider_settings.json`, which is gitignored.
 """
     )
 
@@ -579,6 +721,139 @@ def render_provider_feedback(key_prefix: str) -> None:
                 height=280,
                 key=f"{key_prefix}_provider_debug_dump",
             )
+
+
+def extract_facts_for_text(
+    text: str,
+    metadata: dict[str, Any],
+    provider: ProviderConfig,
+    *,
+    split_over_limit: bool,
+) -> tuple[list[dict[str, Any]], str, str]:
+    limit = suggested_char_limit(provider)
+    chunks = split_text_into_chunks(text, limit) if split_over_limit and len(text) > limit else [text]
+    if len(chunks) == 1:
+        return extract_facts(text, metadata, provider)
+
+    all_facts: list[dict[str, Any]] = []
+    debug_blocks: list[str] = []
+    fallback_count = 0
+    failed_without_fallback = 0
+
+    for index, chunk in enumerate(chunks, start=1):
+        chunk_metadata = {
+            **metadata,
+            "chunk": f"{index}/{len(chunks)}",
+            "chunk_chars": len(chunk),
+        }
+        facts, notice, debug = extract_facts(chunk, chunk_metadata, provider)
+        all_facts.extend(facts)
+
+        if "Fell back to private heuristic" in notice:
+            fallback_count += 1
+        if "No fallback was used" in notice:
+            failed_without_fallback += 1
+        if debug:
+            debug_blocks.append(f"--- Chunk {index}/{len(chunks)} ({len(chunk):,} chars) ---\n{debug}")
+
+    merged_facts = dedupe_facts(all_facts)
+    notice = (
+        f"Split text into {len(chunks)} parts under {limit:,} chars and made "
+        f"{len(chunks)} extraction calls. Extracted {len(merged_facts)} deduped fact(s)."
+    )
+    if fallback_count:
+        notice += f" {fallback_count} part(s) used private heuristic fallback."
+    if failed_without_fallback:
+        notice += f" {failed_without_fallback} part(s) failed without fallback."
+
+    return merged_facts, notice, "\n\n".join(debug_blocks)
+
+
+def split_text_into_chunks(text: str, limit: int) -> list[str]:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if limit <= 0 or len(normalized) <= limit:
+        return [normalized]
+
+    part_count = (len(normalized) + limit - 1) // limit
+    natural_boundaries = find_chunk_boundaries(normalized, sentence_only=False)
+    sentence_boundaries = find_chunk_boundaries(normalized, sentence_only=True)
+    cuts = choose_chunk_cuts(normalized, limit, part_count, natural_boundaries, sentence_boundaries)
+
+    chunks = []
+    start = 0
+    for cut in cuts + [len(normalized)]:
+        chunk = normalized[start:cut].strip()
+        if chunk:
+            chunks.append(chunk)
+        start = cut
+
+    if all(len(chunk) <= limit for chunk in chunks):
+        return chunks
+    return split_oversized_chunks(chunks, limit)
+
+
+def find_chunk_boundaries(text: str, *, sentence_only: bool) -> list[int]:
+    boundaries = set()
+    for match in re.finditer(r"\n+", text):
+        boundaries.add(match.end())
+    for match in re.finditer(r"(?<=[.!?])(?:[\"')\]]+)?\s+", text):
+        boundaries.add(match.end())
+    if not sentence_only:
+        for match in re.finditer(r"\s+", text):
+            boundaries.add(match.end())
+    return sorted(position for position in boundaries if 0 < position < len(text))
+
+
+def choose_chunk_cuts(
+    text: str,
+    limit: int,
+    part_count: int,
+    natural_boundaries: list[int],
+    sentence_boundaries: list[int],
+) -> list[int]:
+    cuts = []
+    previous = 0
+    total = len(text)
+
+    for part_index in range(1, part_count):
+        remaining_parts = part_count - part_index
+        ideal = round(total * part_index / part_count)
+        min_cut = max(previous + 1, total - remaining_parts * limit)
+        max_cut = min(previous + limit, total - remaining_parts)
+        cut = nearest_boundary(sentence_boundaries, ideal, min_cut, max_cut)
+        if cut is None:
+            cut = nearest_boundary(natural_boundaries, ideal, min_cut, max_cut)
+        if cut is None:
+            cut = max_cut
+        cuts.append(cut)
+        previous = cut
+
+    return cuts
+
+
+def nearest_boundary(boundaries: list[int], target: int, minimum: int, maximum: int) -> int | None:
+    candidates = [position for position in boundaries if minimum <= position <= maximum]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda position: (abs(position - target), position))
+
+
+def split_oversized_chunks(chunks: list[str], limit: int) -> list[str]:
+    final_chunks = []
+    for chunk in chunks:
+        if len(chunk) <= limit:
+            final_chunks.append(chunk)
+            continue
+        start = 0
+        while start < len(chunk):
+            cut = min(start + limit, len(chunk))
+            if cut < len(chunk):
+                space = chunk.rfind(" ", start, cut)
+                if space > start:
+                    cut = space + 1
+            final_chunks.append(chunk[start:cut].strip())
+            start = cut
+    return [chunk for chunk in final_chunks if chunk]
 
 
 def extract_facts(

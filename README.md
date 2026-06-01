@@ -22,6 +22,8 @@ LoreLock is no longer seeded with a specific story. You paste or upload story ma
 
 The continuity checker itself is deterministic and explainable. The LLM, if enabled, is used for extraction rather than final judgment.
 
+Provider choices, endpoint URLs, model names, fallback preference, and API key fields are persisted locally in `data/provider_settings.json`. That file is gitignored.
+
 ## Extraction Depth
 
 The app asks for an extraction depth, then suggests an excerpt length:
@@ -31,6 +33,8 @@ The app asks for an extraction depth, then suggests an excerpt length:
 - **Deep**: suggests about 8,000 characters. Best when the scene depends on broader context.
 
 This applies to both memory ingestion and scene checking because both steps perform fact extraction. The suggested length is not a hard limit: the text box counter turns yellow near the target and red when it exceeds it. Longer excerpts give more context, but they also cost more, run slower, and produce more candidate facts to review. Privacy is controlled by the extraction provider choice, not by this setting.
+
+When pasted text exceeds the suggested length, the app can optionally split it into suggested-length parts before extraction. Splitting prefers sentence and newline boundaries and makes one provider/API call per part, so it is off by default.
 
 The main story text boxes use a small local component so character counts update while typing instead of relying on Streamlit's native apply cycle.
 
@@ -58,8 +62,8 @@ $env:CLAUDE_MODEL="claude-sonnet-4-6"
 - `components/live_textarea/` - local textarea component with live character counting
 - `docs/erd.md` - conceptual ERD for the full continuity memory model
 - `docs/demo-plan.md` - presentation-oriented demo plan
-- `data/` - optional local memory saves; JSON files in this folder are gitignored
+- `data/` - optional local memory saves and provider settings; JSON files in this folder are gitignored
 
 ## Privacy Notes
 
-`data/*.json`, `exports/*.json`, `.env`, and `.streamlit/secrets.toml` are ignored so story memory, exports, and API keys do not accidentally enter git.
+`data/*.json`, `exports/*.json`, `.env`, and `.streamlit/secrets.toml` are ignored so story memory, provider settings, exports, and API keys do not accidentally enter git.
