@@ -136,6 +136,7 @@ class ContinuityIssue:
 
 def main() -> None:
     st.set_page_config(page_title="LoreLock", page_icon="LL", layout="wide")
+    apply_compact_styles()
     ensure_state()
 
     st.title("LoreLock")
@@ -152,6 +153,64 @@ def main() -> None:
         render_check_tab(provider)
     with tabs[3]:
         render_privacy_tab()
+
+
+def apply_compact_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stTextArea"] textarea {
+            font-size: 0.82rem !important;
+            line-height: 1.38 !important;
+        }
+
+        [data-testid="stTextArea"] label p {
+            font-size: 0.86rem !important;
+        }
+
+        [data-testid="stAlert"] {
+            font-size: 0.86rem !important;
+        }
+
+        .lorelock-suggestion {
+            margin: 0.35rem 0 0.65rem;
+            padding: 0.55rem 0.65rem;
+            border: 1px solid #d8dee8;
+            border-radius: 0.45rem;
+            background: #f8fafc;
+            color: #334155;
+            font-size: 0.82rem;
+            line-height: 1.3;
+        }
+
+        .lorelock-suggestion strong {
+            display: block;
+            color: #17212b;
+            font-size: 0.9rem;
+            line-height: 1.2;
+            margin-bottom: 0.25rem;
+        }
+
+        .lorelock-counter {
+            margin-top: -0.35rem;
+            margin-bottom: 0.75rem;
+            padding: 0.38rem 0.55rem;
+            border: 1px solid var(--counter-border);
+            border-radius: 0.4rem;
+            background: var(--counter-bg);
+            color: var(--counter-fg);
+            font-size: 0.78rem;
+            line-height: 1.2;
+            font-weight: 650;
+        }
+
+        .lorelock-counter span {
+            font-weight: 450;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def ensure_state() -> None:
@@ -183,14 +242,8 @@ def render_provider_sidebar() -> ProviderConfig:
             help="Choose how deep the extractor should look. The app then suggests a matching excerpt length.",
         )
         profile = EXCERPT_PROFILES[extraction_depth]
-        st.metric(
-            "Suggested excerpt length",
-            f"{profile['recommended_chars']:,} chars",
-            help="Soft target only. The app will not block longer text.",
-        )
-        st.caption("Applies to both memory ingestion and scene checking; both steps extract facts.")
+        render_suggested_length(profile)
         st.info(profile["guidance"])
-
         ollama_url = "http://localhost:11434"
         ollama_model = "llama3.2:3b"
         gemini_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta")
@@ -257,6 +310,18 @@ def render_provider_sidebar() -> ProviderConfig:
 
 def excerpt_profile(provider: ProviderConfig) -> dict[str, Any]:
     return EXCERPT_PROFILES.get(provider.extraction_depth, EXCERPT_PROFILES["Normal scene/chapter excerpt"])
+
+
+def render_suggested_length(profile: dict[str, Any]) -> None:
+    st.markdown(
+        f"""
+        <div class="lorelock-suggestion">
+            <strong>Suggested excerpt: {profile['recommended_chars']:,} chars</strong>
+            Applies to both memory ingestion and scene checking. Soft target, not a limit.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_extraction_guidance(provider: ProviderConfig) -> None:
