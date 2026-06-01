@@ -149,7 +149,8 @@ def extract_facts_for_text(
     limit = suggested_char_limit(provider)
     chunks = split_text_into_chunks(text, limit) if split_over_limit and len(text) > limit else [text]
     if len(chunks) == 1:
-        return extract_facts(text, metadata, provider)
+        facts, notice, debug = extract_facts(text, metadata, provider)
+        return attach_fact_line_refs(text, facts), notice, debug
 
     all_facts: list[dict[str, Any]] = []
     debug_blocks: list[str] = []
@@ -182,7 +183,78 @@ def extract_facts_for_text(
     if failed_without_fallback:
         notice += f" {failed_without_fallback} part(s) failed without fallback."
 
-    return merged_facts, notice, "\n\n".join(debug_blocks)
+    return attach_fact_line_refs(text, merged_facts), notice, "\n\n".join(debug_blocks)
+
+
+def attach_fact_line_refs(text: str, facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    line_starts = text_line_starts(text)
+    search_from = 0
+    updated = []
+    for fact in facts:
+        item = dict(fact)
+        evidence = item.get("evidence", "")
+        if item.get("line_start") or not evidence:
+            updated.append(item)
+            continue
+
+        match = find_evidence_span(text, evidence, start=search_from)
+        if match is None:
+            match = find_evidence_span(text, evidence, start=0)
+        if match is None:
+            updated.append(item)
+            continue
+
+        start, end = match
+        item["char_start"] = start
+        item["char_end"] = end
+        item["line_start"] = line_number_for_offset(line_starts, start)
+        item["line_end"] = line_number_for_offset(line_starts, max(start, end - 1))
+        search_from = end
+        updated.append(item)
+    return updated
+
+
+def find_evidence_span(text: str, evidence: Any, *, start: int) -> tuple[int, int] | None:
+    snippet = str(evidence).strip()
+    if not snippet:
+        return None
+    candidates = [snippet]
+    if snippet.endswith("..."):
+        candidates.append(snippet[:-3].rstrip())
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        index = text.find(candidate, start)
+        if index >= 0:
+            return index, index + len(candidate)
+
+    normalized_text = re.sub(r"\s+", " ", text)
+    normalized_snippet = re.sub(r"\s+", " ", candidates[-1]).strip()
+    if not normalized_snippet:
+        return None
+    normalized_index = normalized_text.find(normalized_snippet)
+    if normalized_index < 0:
+        return None
+    original_prefix = normalized_text[:normalized_index]
+    start_offset = len(original_prefix)
+    return start_offset, start_offset + len(normalized_snippet)
+
+
+def text_line_starts(text: str) -> list[int]:
+    starts = [0]
+    for match in re.finditer("\n", text):
+        starts.append(match.end())
+    return starts
+
+
+def line_number_for_offset(line_starts: list[int], offset: int) -> int:
+    line_number = 1
+    for index, start in enumerate(line_starts, start=1):
+        if start > offset:
+            break
+        line_number = index
+    return line_number
 
 
 def extract_facts(

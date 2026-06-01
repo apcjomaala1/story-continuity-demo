@@ -96,6 +96,11 @@ def stable_fact_id(type_: str, subject: str, predicate: str, object_: str, value
     return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
 
 
+def line_value(value: Any) -> int | None:
+    number = to_int(value, 0)
+    return number or None
+
+
 def make_fact(
     type_: str,
     subject: str,
@@ -123,6 +128,10 @@ def make_fact(
         "pov": str(metadata.get("pov", "")),
         "source": str(metadata.get("source", "unknown")),
         "evidence": trim_value(evidence, limit=240),
+        "line_start": line_value(metadata.get("line_start")),
+        "line_end": line_value(metadata.get("line_end")),
+        "char_start": line_value(metadata.get("char_start")),
+        "char_end": line_value(metadata.get("char_end")),
         "confidence": max(0.0, min(1.0, float(confidence))),
         "extraction": "heuristic",
     }
@@ -489,6 +498,10 @@ def normalize_facts(
                     "pov": as_text(item.get("pov", metadata.get("pov", ""))),
                     "source": as_text(item.get("source", metadata.get("source", "unknown"))),
                     "evidence": evidence,
+                    "line_start": line_value(item.get("line_start", metadata.get("line_start"))),
+                    "line_end": line_value(item.get("line_end", metadata.get("line_end"))),
+                    "char_start": line_value(item.get("char_start", metadata.get("char_start"))),
+                    "char_end": line_value(item.get("char_end", metadata.get("char_end"))),
                     "confidence": confidence_value(item.get("confidence", 0.7)),
                     "extraction": as_text(item.get("extraction", extraction_source)),
                 }

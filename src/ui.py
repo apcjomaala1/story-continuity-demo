@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import sys
 from pathlib import Path
@@ -137,6 +138,7 @@ def ensure_state() -> None:
     st.session_state.setdefault("provider_notice", "")
     st.session_state.setdefault("provider_debug", "")
     st.session_state.setdefault("scene_metadata", {})
+    st.session_state.setdefault("reviewed_text", "")
     st.session_state.setdefault("metadata_notice", "")
     st.session_state.setdefault("metadata_debug", "")
     st.session_state.project_folder_path = str(resolve_project_folder(st.session_state.project_folder_input))
@@ -585,11 +587,14 @@ def render_scene_review_tab(provider: ProviderConfig) -> None:
             st.session_state.provider_notice = notice
             st.session_state.provider_debug = debug
             st.session_state.scene_metadata = metadata
+            st.session_state.reviewed_text = text
 
     render_provider_feedback("review")
 
     with st.expander(f"Continuity notes ({len(st.session_state.issues)})", expanded=bool(st.session_state.issues)):
         render_continuity_warnings(show_header=False)
+        if st.session_state.issues:
+            render_reviewed_text_lines(st.session_state.reviewed_text)
     with st.expander(f"Possible story facts ({len(st.session_state.candidates)})", expanded=bool(st.session_state.candidates)):
         render_candidate_facts(show_header=False)
 
@@ -789,6 +794,10 @@ def fact_to_editor_row(fact: dict[str, Any], *, include_add: bool = False) -> di
         "pov": fact.get("pov", ""),
         "source": fact.get("source", ""),
         "evidence": fact.get("evidence", ""),
+        "line_start": fact.get("line_start"),
+        "line_end": fact.get("line_end"),
+        "char_start": fact.get("char_start"),
+        "char_end": fact.get("char_end"),
         "confidence": fact.get("confidence", 0.7),
         "extraction": fact.get("extraction", ""),
         "relation_type": fact.get("relation_type", ""),
@@ -816,6 +825,10 @@ def fact_editor_columns(*, include_add: bool = False) -> dict[str, Any]:
         "pov": st.column_config.TextColumn("POV", width="medium"),
         "source": st.column_config.TextColumn("Source", width="medium"),
         "evidence": st.column_config.TextColumn("Evidence", width="large"),
+        "line_start": st.column_config.NumberColumn("Line", min_value=1, step=1, width="small"),
+        "line_end": st.column_config.NumberColumn("Line end", min_value=1, step=1, width="small"),
+        "char_start": None,
+        "char_end": None,
         "confidence": st.column_config.NumberColumn("Confidence", min_value=0.0, max_value=1.0, step=0.05),
         "extraction": st.column_config.TextColumn("Reader", width="small"),
         "relation_type": st.column_config.TextColumn("Relation", width="small"),
@@ -856,6 +869,10 @@ def editor_rows_to_facts(value: Any, metadata: dict[str, Any]) -> list[dict[str,
                 "pov": editor_text(row.get("pov")),
                 "source": editor_text(row.get("source")),
                 "evidence": editor_text(row.get("evidence")),
+                "line_start": row.get("line_start"),
+                "line_end": row.get("line_end"),
+                "char_start": row.get("char_start"),
+                "char_end": row.get("char_end"),
                 "confidence": row.get("confidence"),
                 "extraction": editor_text(row.get("extraction")) or "edited",
                 "relation_type": editor_text(row.get("relation_type")),
@@ -897,6 +914,10 @@ def facts_signature(facts: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
             fact.get("pov"),
             fact.get("source"),
             fact.get("evidence"),
+            fact.get("line_start"),
+            fact.get("line_end"),
+            fact.get("char_start"),
+            fact.get("char_end"),
             fact.get("confidence"),
             fact.get("extraction"),
             fact.get("relation_type", ""),
@@ -915,12 +936,82 @@ def render_continuity_warnings(*, show_header: bool = True) -> None:
             with st.container(border=True):
                 st.markdown(f"**{issue.category}** - `{issue.severity.upper()}`")
                 st.write(issue.message)
+                refs = issue_line_refs(issue)
+                if refs:
+                    st.markdown(refs, unsafe_allow_html=True)
                 st.caption(f"Where LoreLock noticed it: {issue.evidence}")
                 st.caption(f"Possible next step: {issue.suggestion}")
     elif st.session_state.scene_facts and not st.session_state.memory:
         st.info("No approved story memory yet, so this pass only found possible facts.")
     else:
         st.info("No warnings yet.")
+
+
+def issue_line_refs(issue: ContinuityIssue) -> str:
+    parts = []
+    if issue.scene_line:
+        parts.append(f'<a href="#scene-line-{issue.scene_line}">Scene line {issue.scene_line}</a>')
+    if issue.memory_line:
+        parts.append(f"Memory line {issue.memory_line}")
+    return " | ".join(parts)
+
+
+def render_reviewed_text_lines(text: str) -> None:
+    if not text:
+        return
+    st.markdown("##### Reviewed text")
+    rows = []
+    for line_number, line in enumerate(text.splitlines() or [""], start=1):
+        rows.append(
+            '<div class="ll-line" id="scene-line-{line_number}">'
+            '<span class="ll-line-num">{line_number}</span>'
+            '<span class="ll-line-text">{line}</span>'
+            '</div>'.format(
+                line_number=line_number,
+                line=html.escape(line) or "&nbsp;",
+            )
+        )
+    st.markdown(
+        """
+        <style>
+        .ll-line-box {
+            border: 1px solid rgba(250, 250, 250, 0.16);
+            border-radius: 8px;
+            max-height: 420px;
+            overflow: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.84rem;
+            line-height: 1.45;
+            background: rgba(255, 255, 255, 0.025);
+        }
+        .ll-line {
+            display: grid;
+            grid-template-columns: 4.5rem minmax(0, 1fr);
+            gap: 0.75rem;
+            padding: 0.05rem 0.75rem;
+            scroll-margin-top: 5rem;
+            white-space: pre-wrap;
+        }
+        .ll-line:target {
+            background: rgba(255, 218, 121, 0.22);
+            outline: 1px solid rgba(255, 218, 121, 0.55);
+        }
+        .ll-line-num {
+            color: rgba(250, 250, 250, 0.48);
+            text-align: right;
+            user-select: none;
+        }
+        .ll-line-text {
+            color: rgba(250, 250, 250, 0.9);
+            overflow-wrap: anywhere;
+        }
+        </style>
+        <div class="ll-line-box">
+        """
+        + "\n".join(rows)
+        + "\n</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_privacy_tab() -> None:

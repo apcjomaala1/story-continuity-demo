@@ -254,3 +254,5 @@ class ContinuityIssue:
     message: str
     evidence: str
     suggestion: str
+    scene_line: int | None = None
+    memory_line: int | None = None

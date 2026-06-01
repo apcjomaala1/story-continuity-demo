@@ -16,6 +16,7 @@ from src.facts import (
     relationship_terms_from_fact,
 )
 from src.utils import (
+    as_text,
     canonical_relationship_type,
     fact_label,
     significant_words,
@@ -66,6 +67,8 @@ PLACE_SUFFIXES = {
 PLACE_RE = re.compile(
     rf"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){{0,2}}\s+(?:{'|'.join(sorted(PLACE_SUFFIXES))}))\b"
 )
+POSSESSION_PRESENT = {"has", "owns", "carries", "receives", "gets", "takes", "gains", "gained", "possesses"}
+POSSESSION_ABSENT = {"loses", "lost", "gives", "gave", "sold", "destroyed"}
 
 
 def check_continuity(
@@ -128,12 +131,14 @@ def relationship_or_status_conflict(
         return None
     if scene_fact["type"] == "relationship":
         return relationship_conflict(scene_fact, memory_fact)
+    if scene_fact["type"] == "possession":
+        return possession_conflict(scene_fact, memory_fact)
     if scene_fact["predicate"].lower() != memory_fact["predicate"].lower():
         return None
 
-    scene_slot = (scene_fact.get("object", "").lower(), scene_fact.get("value", "").lower())
-    memory_slot = (memory_fact.get("object", "").lower(), memory_fact.get("value", "").lower())
-    if not any(scene_slot) or not any(memory_slot) or scene_slot == memory_slot:
+    scene_value = comparable_fact_value(scene_fact)
+    memory_value = comparable_fact_value(memory_fact)
+    if not scene_value or not memory_value or scene_value == memory_value:
         return None
 
     return ContinuityIssue(
@@ -146,7 +151,52 @@ def relationship_or_status_conflict(
             f"Memory: {fact_label(memory_fact)}. Scene: {fact_label(scene_fact)}."
         ),
         suggestion="Confirm whether this is a deliberate change, a flashback, or a continuity mistake.",
+        scene_line=scene_fact.get("line_start"),
+        memory_line=memory_fact.get("line_start"),
     )
+
+
+def comparable_fact_value(fact: dict[str, Any]) -> str:
+    object_ = normalize_comparison_text(fact.get("object", ""))
+    value = normalize_comparison_text(fact.get("value", ""))
+    if object_ and value:
+        return f"{object_}|{value}"
+    return value or object_
+
+
+def normalize_comparison_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", as_text(value).lower()).strip(" .,:;!?\"'")
+
+
+def possession_conflict(scene_fact: dict[str, Any], memory_fact: dict[str, Any]) -> ContinuityIssue | None:
+    scene_item = normalize_comparison_text(scene_fact.get("object") or scene_fact.get("value"))
+    memory_item = normalize_comparison_text(memory_fact.get("object") or memory_fact.get("value"))
+    if not scene_item or scene_item != memory_item:
+        return None
+
+    scene_state = possession_state(scene_fact)
+    memory_state = possession_state(memory_fact)
+    if not scene_state or not memory_state or scene_state == memory_state:
+        return None
+
+    return ContinuityIssue(
+        category="Possession conflict",
+        severity="medium",
+        message=f"{scene_fact['subject']}'s possession state for {scene_fact.get('object') or scene_fact.get('value')} changed.",
+        evidence=f"Memory: {fact_label(memory_fact)}. Scene: {fact_label(scene_fact)}.",
+        suggestion="Keep both only if the scene order shows the item was gained, lost, given away, or recovered.",
+        scene_line=scene_fact.get("line_start"),
+        memory_line=memory_fact.get("line_start"),
+    )
+
+
+def possession_state(fact: dict[str, Any]) -> str:
+    predicate = normalize_comparison_text(fact.get("predicate", ""))
+    if predicate in POSSESSION_ABSENT:
+        return "absent"
+    if predicate in POSSESSION_PRESENT:
+        return "present"
+    return ""
 
 
 def relationship_conflict(
@@ -180,6 +230,8 @@ def relationship_conflict(
             "Keep both if the relationship changed intentionally and story order supports it; "
             "otherwise approve the correct relationship state."
         ),
+        scene_line=scene_fact.get("line_start"),
+        memory_line=memory_fact.get("line_start"),
     )
 
 
@@ -223,6 +275,8 @@ def knowledge_timing_conflict(
             f"Scene at story order {scene_fact['story_order']}: {scene_fact.get('evidence', '')}"
         ),
         suggestion="Move the reveal earlier in memory, lower the scene story order, or rewrite the scene so the character is guessing.",
+        scene_line=scene_fact.get("line_start"),
+        memory_line=memory_fact.get("line_start"),
     )
 
 
@@ -255,6 +309,7 @@ def lifecycle_conflicts(
                 message=f"{fact['subject']} is marked as {value} in memory but appears in the scene.",
                 evidence=f"Memory: {fact.get('evidence', fact_label(fact))}",
                 suggestion="Check whether this is a flashback, resurrection/repair, mistaken identity, or a real continuity issue.",
+                memory_line=fact.get("line_start"),
             )
         )
     return issues
@@ -280,6 +335,7 @@ def world_rule_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[
                 message="The scene touches a topic governed by a restrictive world rule.",
                 evidence=f"Rule: {fact.get('evidence', fact.get('value', ''))}",
                 suggestion="Ask whether the scene violates the rule, creates a valid exception, or needs clearer wording.",
+                memory_line=fact.get("line_start"),
             )
         )
     return issues
@@ -287,7 +343,7 @@ def world_rule_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[
 
 def identity_name_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[ContinuityIssue]:
     memory_names = indexed_person_names(memory_texts(memory))
-    scene_names = indexed_person_names([(scene_text, scene_text)])
+    scene_names = indexed_person_names([(scene_text, scene_text, None)])
     issues = []
 
     for first_name, scene_variants in scene_names.items():
@@ -311,6 +367,8 @@ def identity_name_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> li
                             "Check whether this is a rename, alias, title change, mistaken identity, "
                             "or an unintended continuity error."
                         ),
+                        scene_line=scene_entry["line"],
+                        memory_line=memory_entry["line"],
                     )
                 )
     return issues
@@ -318,7 +376,7 @@ def identity_name_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> li
 
 def named_place_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[ContinuityIssue]:
     memory_places = indexed_places(memory_texts(memory))
-    scene_places = indexed_places([(scene_text, scene_text)])
+    scene_places = indexed_places([(scene_text, scene_text, None)])
     issues = []
 
     for suffix, scene_variants in scene_places.items():
@@ -340,12 +398,14 @@ def named_place_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list
                             "Confirm whether this is a new location, a renamed location, a flashback, "
                             "or a continuity mistake."
                         ),
+                        scene_line=scene_entry["line"],
+                        memory_line=memory_entry["line"],
                     )
                 )
     return issues
 
 
-def memory_texts(memory: list[dict[str, Any]]) -> list[tuple[str, str]]:
+def memory_texts(memory: list[dict[str, Any]]) -> list[tuple[str, str, int | None]]:
     texts = []
     for fact in memory:
         evidence = fact.get("evidence") or fact_label(fact)
@@ -360,13 +420,13 @@ def memory_texts(memory: list[dict[str, Any]]) -> list[tuple[str, str]]:
             ]
             if part
         )
-        texts.append((text, str(evidence)))
+        texts.append((text, str(evidence), fact.get("line_start")))
     return texts
 
 
-def indexed_person_names(texts: list[tuple[str, str]]) -> dict[str, dict[str, dict[str, str]]]:
+def indexed_person_names(texts: list[tuple[str, str, int | None]]) -> dict[str, dict[str, dict[str, Any]]]:
     indexed: dict[str, dict[str, dict[str, str]]] = {}
-    for text, evidence in texts:
+    for text, evidence, line_hint in texts:
         for raw_name in extract_names(text):
             name_parts = person_name_parts(raw_name)
             if not name_parts:
@@ -374,7 +434,11 @@ def indexed_person_names(texts: list[tuple[str, str]]) -> dict[str, dict[str, di
             first_name, last_name, display_name = name_parts
             indexed.setdefault(first_name.lower(), {}).setdefault(
                 last_name.lower(),
-                {"name": display_name, "evidence": evidence_excerpt(evidence, display_name)},
+                {
+                    "name": display_name,
+                    "evidence": evidence_excerpt(evidence, display_name),
+                    "line": line_hint or line_number_for_snippet(text, display_name),
+                },
             )
     return indexed
 
@@ -392,9 +456,9 @@ def person_name_parts(name: str) -> tuple[str, str, str] | None:
     return parts[0], parts[-1], " ".join(parts)
 
 
-def indexed_places(texts: list[tuple[str, str]]) -> dict[str, dict[str, dict[str, str]]]:
-    indexed: dict[str, dict[str, dict[str, str]]] = {}
-    for text, evidence in texts:
+def indexed_places(texts: list[tuple[str, str, int | None]]) -> dict[str, dict[str, dict[str, Any]]]:
+    indexed: dict[str, dict[str, dict[str, Any]]] = {}
+    for text, evidence, line_hint in texts:
         for match in PLACE_RE.finditer(text):
             place = match.group(1)
             parts = place.split()
@@ -403,9 +467,16 @@ def indexed_places(texts: list[tuple[str, str]]) -> dict[str, dict[str, dict[str
             suffix = parts[-1].lower()
             indexed.setdefault(suffix, {}).setdefault(
                 place.lower(),
-                {"name": place, "evidence": evidence_excerpt(evidence, place)},
+                {"name": place, "evidence": evidence_excerpt(evidence, place), "line": line_hint or line_number_for_snippet(text, place)},
             )
     return indexed
+
+
+def line_number_for_snippet(text: str, needle: str) -> int | None:
+    position = str(text).lower().find(str(needle).lower())
+    if position < 0:
+        return None
+    return str(text)[:position].count("\n") + 1
 
 
 def evidence_excerpt(text: str, needle: str, *, radius: int = 90) -> str:

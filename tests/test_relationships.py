@@ -130,3 +130,33 @@ def test_different_named_academy_warns_about_setting_drift() -> None:
     issues = check_continuity("Liora woke in the desert dormitory of Sunspire Academy.", [], memory)
 
     assert any(issue.category == "Possible setting drift" for issue in issues)
+
+
+def test_different_possessions_do_not_conflict() -> None:
+    memory = normalize_facts(
+        [{"type": "possession", "subject": "Liora Vale", "predicate": "owns", "object": "iron key"}],
+        metadata(),
+    )
+    scene = normalize_facts(
+        [{"type": "possession", "subject": "Liora Vale", "predicate": "owns", "object": "trunk"}],
+        metadata(),
+    )
+
+    issues = check_continuity("Liora Vale owns a trunk.", scene, memory)
+
+    assert not [issue for issue in issues if issue.category in {"Fact conflict", "Possession conflict"}]
+
+
+def test_same_status_split_between_object_and_value_does_not_conflict() -> None:
+    memory = normalize_facts(
+        [{"type": "status", "subject": "Seraphine Ardent", "predicate": "affiliation", "object": "House Ardent"}],
+        metadata(),
+    )
+    scene = normalize_facts(
+        [{"type": "status", "subject": "Seraphine Ardent", "predicate": "affiliation", "value": "House Ardent"}],
+        metadata(),
+    )
+
+    issues = check_continuity("Seraphine Ardent's affiliation is House Ardent.", scene, memory)
+
+    assert not [issue for issue in issues if issue.category == "Fact conflict"]
