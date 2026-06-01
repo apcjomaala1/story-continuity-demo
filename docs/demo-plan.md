@@ -76,11 +76,11 @@ The fuller data model is documented in `docs/erd.md`. The key architectural idea
 
 The UI asks for extraction depth, then suggests a matching excerpt length:
 
-- **Quick**: about 3,000 characters for a small focused check.
-- **Standard**: about 6,500 characters for the default demo.
-- **Deep**: about 12,000 characters when the scene depends on broader context.
+- **Quick**: about 1,500 characters for a small focused check.
+- **Standard**: about 4,000 characters for the default demo.
+- **Deep**: about 8,000 characters when the scene depends on broader context.
 
-Privacy is controlled by the extraction provider. Excerpt size only controls how much context the selected provider analyzes.
+This applies to both memory ingestion and scene checking because both steps extract facts. Privacy is controlled by the extraction provider. Excerpt size only controls how much context the selected provider analyzes.
 
 ## Next Build Steps
 

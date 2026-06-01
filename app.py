@@ -82,30 +82,27 @@ STOP_NAMES = {
 EXCERPT_PROFILES = {
     "Quick scene slice": {
         "label": "Quick",
-        "recommended_chars": 3000,
-        "slider_max": 8000,
+        "recommended_chars": 1500,
         "max_facts": 18,
         "temperature": 0.0,
         "max_output_tokens": 1800,
-        "guidance": "Best for one short scene or a focused rewrite. Fastest and cheapest extraction.",
+        "guidance": "Best for one short scene beat, a small rewrite, or a focused contradiction check.",
     },
     "Normal scene/chapter excerpt": {
         "label": "Standard",
-        "recommended_chars": 6500,
-        "slider_max": 14000,
+        "recommended_chars": 4000,
         "max_facts": 36,
         "temperature": 0.1,
         "max_output_tokens": 3200,
-        "guidance": "Best default. Usually enough for one long scene or a partial chapter with several reveals.",
+        "guidance": "Best default. Usually enough for one scene or a tight partial chapter excerpt.",
     },
     "Deep chapter pass": {
         "label": "Deep",
-        "recommended_chars": 12000,
-        "slider_max": 24000,
+        "recommended_chars": 8000,
         "max_facts": 72,
         "temperature": 0.1,
         "max_output_tokens": 6000,
-        "guidance": "Use with stronger models when the scene depends on broader context. Slower and more expensive.",
+        "guidance": "Use when the scene depends on broader context. Slower and more expensive.",
     },
 }
 
@@ -189,8 +186,9 @@ def render_provider_sidebar() -> ProviderConfig:
         st.metric(
             "Suggested excerpt length",
             f"{profile['recommended_chars']:,} chars",
-            help="Use this as the starting point for the text window. You can still adjust it in each tab.",
+            help="Soft target only. The app will not block longer text.",
         )
+        st.caption("Applies to both memory ingestion and scene checking; both steps extract facts.")
         st.info(profile["guidance"])
 
         ollama_url = "http://localhost:11434"
@@ -225,7 +223,7 @@ def render_provider_sidebar() -> ProviderConfig:
             api_model = st.text_input("Model", value=api_model)
             api_key = st.text_input("API key", value=api_key, type="password")
 
-        st.caption("Privacy is controlled by the extraction provider. Excerpt size only controls how much context is analyzed.")
+        st.caption("Privacy is controlled by the extraction provider. Extraction depth only suggests how much context to paste.")
         fallback_to_heuristic = st.checkbox(
             "Use private heuristic fallback if extraction provider fails",
             value=True,
@@ -261,21 +259,54 @@ def excerpt_profile(provider: ProviderConfig) -> dict[str, Any]:
     return EXCERPT_PROFILES.get(provider.extraction_depth, EXCERPT_PROFILES["Normal scene/chapter excerpt"])
 
 
-def render_excerpt_slider(label: str, provider: ProviderConfig) -> int:
+def render_extraction_guidance(provider: ProviderConfig) -> None:
     profile = excerpt_profile(provider)
-    value = st.slider(
-        label,
-        min_value=1000,
-        max_value=profile["slider_max"],
-        value=profile["recommended_chars"],
-        step=500,
-        help=(
-            f"{profile['guidance']} Longer excerpts improve context but cost more, "
-            "take longer, and may produce more candidate facts to review."
-        ),
+    st.info(
+        f"Suggested for **{profile['label']}** depth: about **{profile['recommended_chars']:,} characters**. "
+        "This is a soft target, not a limit."
     )
-    st.info(f"Suggested for **{profile['label']}** depth: about **{profile['recommended_chars']:,} characters**.")
-    return int(value)
+
+
+def render_character_counter(text: str, provider: ProviderConfig) -> None:
+    profile = excerpt_profile(provider)
+    suggested = int(profile["recommended_chars"])
+    count = len(text)
+    ratio = count / suggested if suggested else 0
+
+    if ratio > 1:
+        background = "#fef2f2"
+        border = "#dc2626"
+        color = "#991b1b"
+        status = "Over suggested length"
+    elif ratio >= 0.85:
+        background = "#fffbeb"
+        border = "#d97706"
+        color = "#92400e"
+        status = "Near suggested length"
+    else:
+        background = "#f8fafc"
+        border = "#cbd5e1"
+        color = "#334155"
+        status = "Within suggested length"
+
+    st.markdown(
+        f"""
+        <div style="
+            margin-top: -0.35rem;
+            margin-bottom: 0.75rem;
+            padding: 0.55rem 0.75rem;
+            border: 1px solid {border};
+            border-radius: 0.5rem;
+            background: {background};
+            color: {color};
+            font-weight: 700;
+        ">
+            {count:,} / {suggested:,} chars
+            <span style="font-weight: 500;"> · {status}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_ingest_tab(provider: ProviderConfig) -> None:
@@ -289,7 +320,7 @@ def render_ingest_tab(provider: ProviderConfig) -> None:
     with meta_col:
         metadata = render_metadata_form("ingest", default_source="story note")
         uploaded = st.file_uploader("Optional text file", type=["txt", "md"])
-        max_chars = render_excerpt_slider("Characters to analyze", provider)
+        render_extraction_guidance(provider)
 
     uploaded_text = ""
     if uploaded is not None:
@@ -303,13 +334,14 @@ def render_ingest_tab(provider: ProviderConfig) -> None:
             height=360,
             placeholder="Paste story material here.",
         )
+        render_character_counter(text, provider)
 
     if st.button("Extract candidate memory", type="primary", use_container_width=True):
         if not text.strip():
             st.error("Paste or upload story text first.")
         else:
             with st.spinner("Extracting candidate facts..."):
-                facts, notice = extract_facts(text[:max_chars], metadata, provider)
+                facts, notice = extract_facts(text, metadata, provider)
             st.session_state.candidates = facts
             st.session_state.provider_notice = notice
 
@@ -445,7 +477,7 @@ def render_check_tab(provider: ProviderConfig) -> None:
     meta_col, text_col = st.columns([0.34, 0.66], gap="large")
     with meta_col:
         metadata = render_metadata_form("check", default_source="draft scene")
-        max_chars = render_excerpt_slider("Characters to check", provider)
+        render_extraction_guidance(provider)
 
     with text_col:
         scene_text = st.text_area(
@@ -454,20 +486,21 @@ def render_check_tab(provider: ProviderConfig) -> None:
             placeholder="Paste the scene you want to check.",
             key="scene_text",
         )
+        render_character_counter(scene_text, provider)
 
     if st.button("Extract and check scene", type="primary", use_container_width=True):
         if not scene_text.strip():
             st.error("Paste a scene first.")
         elif not st.session_state.memory:
             st.warning("Memory is empty. You can still extract scene facts, but there is nothing to compare against.")
-            facts, notice = extract_facts(scene_text[:max_chars], metadata, provider)
+            facts, notice = extract_facts(scene_text, metadata, provider)
             st.session_state.scene_facts = facts
             st.session_state.issues = []
             st.session_state.provider_notice = notice
         else:
             with st.spinner("Extracting scene facts and checking continuity..."):
-                facts, notice = extract_facts(scene_text[:max_chars], metadata, provider)
-                issues = check_continuity(scene_text[:max_chars], facts, st.session_state.memory)
+                facts, notice = extract_facts(scene_text, metadata, provider)
+                issues = check_continuity(scene_text, facts, st.session_state.memory)
             st.session_state.scene_facts = facts
             st.session_state.issues = issues
             st.session_state.provider_notice = notice

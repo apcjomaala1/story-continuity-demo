@@ -26,11 +26,11 @@ The continuity checker itself is deterministic and explainable. The LLM, if enab
 
 The app asks for an extraction depth, then suggests an excerpt length:
 
-- **Quick**: suggests about 3,000 characters. Best for one short scene or a focused rewrite.
-- **Standard**: suggests about 6,500 characters. Best default for one long scene or partial chapter.
-- **Deep**: suggests about 12,000 characters. Best when the scene depends on broader context.
+- **Quick**: suggests about 1,500 characters. Best for one short scene beat or a focused contradiction check.
+- **Standard**: suggests about 4,000 characters. Best default for one scene or tight partial chapter.
+- **Deep**: suggests about 8,000 characters. Best when the scene depends on broader context.
 
-Longer excerpts give more context, but they also cost more, run slower, and produce more candidate facts to review. Privacy is controlled by the extraction provider choice, not by this setting.
+This applies to both memory ingestion and scene checking because both steps perform fact extraction. The suggested length is not a hard limit: the text box counter turns yellow near the target and red when it exceeds it. Longer excerpts give more context, but they also cost more, run slower, and produce more candidate facts to review. Privacy is controlled by the extraction provider choice, not by this setting.
 
 ## Run
 
