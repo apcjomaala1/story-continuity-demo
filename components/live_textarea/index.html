@@ -106,7 +106,7 @@
       let sendTimer = null;
 
       function post(type, data) {
-        window.parent.postMessage({ type, ...data }, "*");
+        window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
       }
 
       function setFrameHeight() {
