@@ -6,6 +6,7 @@ from typing import Any
 from src.constants import (
     NAME_RE,
     RELATIONSHIP_CONFLICT_PAIRS,
+    STOP_NAMES,
     ContinuityIssue,
 )
 from src.extraction import extract_names
@@ -19,6 +20,51 @@ from src.utils import (
     fact_label,
     significant_words,
     text_overlap,
+)
+
+PERSON_TITLE_WORDS = {
+    "Crown",
+    "Duke",
+    "Duchess",
+    "Headmaster",
+    "Headmistress",
+    "House",
+    "King",
+    "Lady",
+    "Lord",
+    "Master",
+    "Prince",
+    "Princess",
+    "Professor",
+    "Queen",
+    "Registrar",
+}
+INVALID_PERSON_NAME_PARTS = {
+    *STOP_NAMES,
+    "First",
+    "Second",
+    "Third",
+    "Fourth",
+    "Fifth",
+    "Sixth",
+    "Seventh",
+    "Eighth",
+    "Ninth",
+    "Tenth",
+}
+PLACE_SUFFIXES = {
+    "Academy",
+    "Dormitory",
+    "Gate",
+    "Hall",
+    "Library",
+    "Observatory",
+    "Orchard",
+    "Spire",
+    "Tower",
+}
+PLACE_RE = re.compile(
+    rf"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){{0,2}}\s+(?:{'|'.join(sorted(PLACE_SUFFIXES))}))\b"
 )
 
 
@@ -44,6 +90,8 @@ def check_continuity(
 
     issues.extend(lifecycle_conflicts(scene_text, scene_facts, scoped))
     issues.extend(world_rule_conflicts(scene_text, scoped))
+    issues.extend(identity_name_conflicts(scene_text, memory))
+    issues.extend(named_place_conflicts(scene_text, memory))
     return dedupe_issues(issues)
 
 
@@ -235,6 +283,143 @@ def world_rule_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[
             )
         )
     return issues
+
+
+def identity_name_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[ContinuityIssue]:
+    memory_names = indexed_person_names(memory_texts(memory))
+    scene_names = indexed_person_names([(scene_text, scene_text)])
+    issues = []
+
+    for first_name, scene_variants in scene_names.items():
+        memory_variants = memory_names.get(first_name, {})
+        for scene_last, scene_entry in scene_variants.items():
+            for memory_last, memory_entry in memory_variants.items():
+                if scene_last == memory_last:
+                    continue
+                issues.append(
+                    ContinuityIssue(
+                        category="Possible identity drift",
+                        severity="medium",
+                        message=(
+                            f"{scene_entry['name']} uses a different family/name marker than approved memory "
+                            f"for {memory_entry['name']}."
+                        ),
+                        evidence=(
+                            f"Memory: {memory_entry['evidence']} Scene: {scene_entry['evidence']}"
+                        ),
+                        suggestion=(
+                            "Check whether this is a rename, alias, title change, mistaken identity, "
+                            "or an unintended continuity error."
+                        ),
+                    )
+                )
+    return issues
+
+
+def named_place_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[ContinuityIssue]:
+    memory_places = indexed_places(memory_texts(memory))
+    scene_places = indexed_places([(scene_text, scene_text)])
+    issues = []
+
+    for suffix, scene_variants in scene_places.items():
+        memory_variants = memory_places.get(suffix, {})
+        for scene_key, scene_entry in scene_variants.items():
+            for memory_key, memory_entry in memory_variants.items():
+                if scene_key == memory_key:
+                    continue
+                issues.append(
+                    ContinuityIssue(
+                        category="Possible setting drift",
+                        severity="medium",
+                        message=(
+                            f"The scene references {scene_entry['name']}, but approved memory references "
+                            f"{memory_entry['name']} as a named {suffix.lower()}."
+                        ),
+                        evidence=f"Memory: {memory_entry['evidence']} Scene: {scene_entry['evidence']}",
+                        suggestion=(
+                            "Confirm whether this is a new location, a renamed location, a flashback, "
+                            "or a continuity mistake."
+                        ),
+                    )
+                )
+    return issues
+
+
+def memory_texts(memory: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    texts = []
+    for fact in memory:
+        evidence = fact.get("evidence") or fact_label(fact)
+        text = ". ".join(
+            str(part)
+            for part in [
+                fact.get("subject", ""),
+                fact.get("predicate", ""),
+                fact.get("object", ""),
+                fact.get("value", ""),
+                evidence,
+            ]
+            if part
+        )
+        texts.append((text, str(evidence)))
+    return texts
+
+
+def indexed_person_names(texts: list[tuple[str, str]]) -> dict[str, dict[str, dict[str, str]]]:
+    indexed: dict[str, dict[str, dict[str, str]]] = {}
+    for text, evidence in texts:
+        for raw_name in extract_names(text):
+            name_parts = person_name_parts(raw_name)
+            if not name_parts:
+                continue
+            first_name, last_name, display_name = name_parts
+            indexed.setdefault(first_name.lower(), {}).setdefault(
+                last_name.lower(),
+                {"name": display_name, "evidence": evidence_excerpt(evidence, display_name)},
+            )
+    return indexed
+
+
+def person_name_parts(name: str) -> tuple[str, str, str] | None:
+    parts = [part for part in name.split() if part not in PERSON_TITLE_WORDS]
+    if len(parts) < 2:
+        return None
+    if any(part in INVALID_PERSON_NAME_PARTS for part in parts):
+        return None
+    if parts[-1] in PLACE_SUFFIXES:
+        return None
+    if any(part.isupper() and len(part) > 1 for part in parts):
+        return None
+    return parts[0], parts[-1], " ".join(parts)
+
+
+def indexed_places(texts: list[tuple[str, str]]) -> dict[str, dict[str, dict[str, str]]]:
+    indexed: dict[str, dict[str, dict[str, str]]] = {}
+    for text, evidence in texts:
+        for match in PLACE_RE.finditer(text):
+            place = match.group(1)
+            parts = place.split()
+            if any(part.isupper() and len(part) > 1 for part in parts):
+                continue
+            suffix = parts[-1].lower()
+            indexed.setdefault(suffix, {}).setdefault(
+                place.lower(),
+                {"name": place, "evidence": evidence_excerpt(evidence, place)},
+            )
+    return indexed
+
+
+def evidence_excerpt(text: str, needle: str, *, radius: int = 90) -> str:
+    normalized = re.sub(r"\s+", " ", str(text)).strip()
+    if not normalized:
+        return needle
+    position = normalized.lower().find(needle.lower())
+    if position < 0:
+        return normalized[:200]
+    start = max(0, position - radius)
+    end = min(len(normalized), position + len(needle) + radius)
+    prefix = "..." if start else ""
+    suffix = "..." if end < len(normalized) else ""
+    return f"{prefix}{normalized[start:end]}{suffix}"
 
 
 def dedupe_issues(issues: list[ContinuityIssue]) -> list[ContinuityIssue]:

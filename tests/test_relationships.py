@@ -93,3 +93,40 @@ def test_conflicting_relationship_status_still_warns() -> None:
     issues = check_continuity("Mara introduced herself as Dain's girlfriend.", scene, memory)
 
     assert any(issue.category == "Relationship conflict" for issue in issues)
+
+
+def test_same_first_name_with_different_surname_warns_about_identity_drift() -> None:
+    memory = normalize_facts(
+        [
+            {
+                "type": "character",
+                "subject": "Caelan Thorne",
+                "predicate": "identity",
+                "value": "Crown Prince of Merrowyn",
+                "evidence": "Caelan Thorne is Crown Prince of Merrowyn.",
+            }
+        ],
+        metadata(),
+    )
+
+    issues = check_continuity("Caelan Ardent was a cheerful commoner artificer.", [], memory)
+
+    assert any(issue.category == "Possible identity drift" for issue in issues)
+
+
+def test_different_named_academy_warns_about_setting_drift() -> None:
+    memory = normalize_facts(
+        [
+            {
+                "type": "location",
+                "subject": "Veyrfall Academy",
+                "predicate": "setting",
+                "evidence": "Veyrfall Academy leaned into the sea wind.",
+            }
+        ],
+        metadata(),
+    )
+
+    issues = check_continuity("Liora woke in the desert dormitory of Sunspire Academy.", [], memory)
+
+    assert any(issue.category == "Possible setting drift" for issue in issues)

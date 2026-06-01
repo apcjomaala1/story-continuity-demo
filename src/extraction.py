@@ -26,6 +26,7 @@ from src.providers import (
     call_model_for_json,
     call_ollama,
     call_openai_compatible,
+    excerpt_profile,
     parse_json_object,
     provider_source_label,
     suggested_char_limit,
@@ -210,8 +211,15 @@ def extract_facts(
         debug = build_provider_debug(exc, provider, metadata, text, raw)
         if not provider.fallback_to_heuristic:
             return [], f"Provider failed ({summarize_exception(exc)}). No fallback was used.", debug
-        facts = heuristic_extract(text, metadata)
+        facts = heuristic_extract(text, metadata, max_facts=heuristic_fact_limit(text, provider))
         return facts, f"Provider failed ({summarize_exception(exc)}). Fell back to private heuristic extraction.", debug
+
+
+def heuristic_fact_limit(text: str, provider: ProviderConfig) -> int:
+    profile_max = int(excerpt_profile(provider).get("max_facts", 36))
+    char_limit = max(1, suggested_char_limit(provider))
+    estimated_parts = max(1, (len(text) + char_limit - 1) // char_limit)
+    return min(180, max(profile_max, profile_max * estimated_parts))
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +319,7 @@ def split_oversized_chunks(chunks: list[str], limit: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def heuristic_extract(text: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+def heuristic_extract(text: str, metadata: dict[str, Any], *, max_facts: int = 96) -> list[dict[str, Any]]:
     sentences = split_sentences(text)
     facts: list[dict[str, Any]] = []
 
@@ -324,7 +332,7 @@ def heuristic_extract(text: str, metadata: dict[str, Any]) -> list[dict[str, Any
         facts.extend(extract_world_rules(sentence, sentence_meta))
         facts.extend(extract_events(sentence, sentence_meta))
 
-    return dedupe_facts(facts)[:24]
+    return dedupe_facts(facts)[:max_facts]
 
 
 def metadata_for_sentence(sentence: str, metadata: dict[str, Any]) -> dict[str, Any]:
