@@ -249,15 +249,10 @@ if (-not [System.IO.Directory]::Exists($initial)) {
 
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Choose LoreLock project folder'
+$dialog.UseDescriptionForTitle = $true
 $dialog.ShowNewFolderButton = $true
+$dialog.AutoUpgradeEnabled = $true
 $dialog.SelectedPath = $initial
-
-if ($dialog.GetType().GetProperty('UseDescriptionForTitle') -ne $null) {
-    $dialog.UseDescriptionForTitle = $true
-}
-if ($dialog.GetType().GetProperty('AutoUpgradeEnabled') -ne $null) {
-    $dialog.AutoUpgradeEnabled = $true
-}
 
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
