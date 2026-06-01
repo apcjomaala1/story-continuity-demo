@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -236,6 +237,8 @@ def autosave_project_state() -> None:
 
 
 def choose_project_folder_dialog(initial_dir: Path) -> str:
+    enable_windows_dpi_awareness()
+
     import tkinter as tk
     from tkinter import filedialog
 
@@ -251,6 +254,31 @@ def choose_project_folder_dialog(initial_dir: Path) -> str:
     finally:
         root.destroy()
     return selected
+
+
+def enable_windows_dpi_awareness() -> None:
+    if sys.platform != "win32":
+        return
+
+    import ctypes
+
+    try:
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    except (AttributeError, OSError):
+        pass
+
+    try:
+        result = ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        if result == 0:
+            return
+    except (AttributeError, OSError):
+        pass
+
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
 
 
 def render_model_selector(
