@@ -434,6 +434,14 @@ def render_provider_sidebar() -> ProviderConfig:
             key="provider_fallback_to_heuristic",
             help="This backup is less accurate. It exists so the demo can still run when a model is unavailable.",
         )
+        retry_missed_with_ai = st.checkbox(
+            "Retry missed continuity lines with selected reader",
+            key="provider_retry_missed_with_ai",
+            help=(
+                "After the coverage audit finds relevant lines with no extracted facts, send only those missed lines "
+                "back to the selected reader. This can improve recall but may add provider/API calls."
+            ),
+        )
 
         st.divider()
         st.metric("Story facts saved", len(st.session_state.memory))
@@ -458,6 +466,7 @@ def render_provider_sidebar() -> ProviderConfig:
         api_key=api_key.strip(),
         api_model=api_model.strip(),
         fallback_to_heuristic=fallback_to_heuristic,
+        retry_missed_with_ai=retry_missed_with_ai,
     )
     try:
         save_provider_settings_to_disk(provider, project_provider_settings_file(project_folder))

@@ -245,6 +245,7 @@ class ProviderConfig:
     api_key: str
     api_model: str
     fallback_to_heuristic: bool
+    retry_missed_with_ai: bool = False
 
 
 @dataclass(frozen=True)

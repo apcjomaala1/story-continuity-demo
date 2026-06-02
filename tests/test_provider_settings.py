@@ -18,6 +18,7 @@ def test_default_provider_urls_are_nonempty_when_env_is_blank(monkeypatch) -> No
     assert settings["gemini_url"] == "https://generativelanguage.googleapis.com/v1beta"
     assert settings["claude_url"] == "https://api.anthropic.com/v1"
     assert settings["api_url"] == "https://api.openai.com/v1"
+    assert settings["retry_missed_with_ai"] is False
 
 
 def test_blank_saved_provider_urls_are_backfilled(tmp_path, monkeypatch) -> None:
@@ -43,3 +44,20 @@ def test_blank_saved_provider_urls_are_backfilled(tmp_path, monkeypatch) -> None
     assert settings["gemini_url"] == "https://generativelanguage.googleapis.com/v1beta"
     assert settings["claude_url"] == "https://api.anthropic.com/v1"
     assert settings["api_url"] == "https://api.openai.com/v1"
+
+
+def test_retry_missed_with_ai_setting_is_loaded(tmp_path, monkeypatch) -> None:
+    settings_file = tmp_path / "provider_settings.json"
+    settings_file.write_text(
+        json.dumps(
+            {
+                "retry_missed_with_ai": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(providers, "PROVIDER_SETTINGS_FILE", settings_file)
+
+    settings = providers.load_provider_settings_from_disk()
+
+    assert settings["retry_missed_with_ai"] is True

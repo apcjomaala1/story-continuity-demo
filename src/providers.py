@@ -456,6 +456,7 @@ def default_provider_settings() -> dict[str, Any]:
         "api_key": os.getenv("OPENAI_API_KEY", ""),
         "api_model": env_or_default("OPENAI_MODEL", "gpt-4o-mini"),
         "fallback_to_heuristic": True,
+        "retry_missed_with_ai": False,
     }
 
 
@@ -513,6 +514,7 @@ def provider_settings_payload(provider: ProviderConfig) -> dict[str, Any]:
         "api_key": provider.api_key,
         "api_model": provider.api_model,
         "fallback_to_heuristic": provider.fallback_to_heuristic,
+        "retry_missed_with_ai": provider.retry_missed_with_ai,
     }
 
 

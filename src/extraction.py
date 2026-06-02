@@ -150,7 +150,9 @@ def extract_facts_for_text(
     chunks = split_text_into_chunks(text, limit) if split_over_limit and len(text) > limit else [text]
     if len(chunks) == 1:
         facts, notice, debug = extract_facts(text, metadata, provider)
-        return attach_fact_line_refs(text, facts), notice, debug
+        facts = attach_fact_line_refs(text, facts)
+        facts, coverage_notice = recover_uncovered_relevant_facts(text, facts, metadata, provider)
+        return facts, combine_notices(notice, coverage_notice), debug
 
     all_facts: list[dict[str, Any]] = []
     debug_blocks: list[str] = []
@@ -183,7 +185,13 @@ def extract_facts_for_text(
     if failed_without_fallback:
         notice += f" {failed_without_fallback} part(s) failed without fallback."
 
-    return attach_fact_line_refs(text, merged_facts), notice, "\n\n".join(debug_blocks)
+    merged_facts = attach_fact_line_refs(text, merged_facts)
+    merged_facts, coverage_notice = recover_uncovered_relevant_facts(text, merged_facts, metadata, provider)
+    return merged_facts, combine_notices(notice, coverage_notice), "\n\n".join(debug_blocks)
+
+
+def combine_notices(*parts: str) -> str:
+    return " ".join(part for part in parts if part)
 
 
 def attach_fact_line_refs(text: str, facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -255,6 +263,214 @@ def line_number_for_offset(line_starts: list[int], offset: int) -> int:
             break
         line_number = index
     return line_number
+
+
+def recover_uncovered_relevant_facts(
+    text: str,
+    facts: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    provider: ProviderConfig,
+) -> tuple[list[dict[str, Any]], str]:
+    facts, retry_notice = retry_uncovered_relevant_facts(text, facts, metadata, provider)
+    facts, backfill_notice = backfill_uncovered_relevant_facts(
+        text,
+        facts,
+        metadata,
+        allow_heuristic_backfill=provider.fallback_to_heuristic,
+    )
+    return facts, combine_notices(retry_notice, backfill_notice)
+
+
+def retry_uncovered_relevant_facts(
+    text: str,
+    facts: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    provider: ProviderConfig,
+) -> tuple[list[dict[str, Any]], str]:
+    if not provider.retry_missed_with_ai:
+        return facts, ""
+
+    uncovered = uncovered_relevant_spans(text, facts)
+    if not uncovered:
+        return facts, ""
+
+    missed_text = "\n".join(span["text"] for span in uncovered)
+    retry_metadata = {**metadata, "source": f"{metadata.get('source', 'unknown')} missed-line retry"}
+    retry_facts, retry_notice, _debug = extract_facts(missed_text, retry_metadata, provider)
+    retry_facts = attach_fact_line_refs(text, retry_facts)
+    merged = dedupe_fact_like_items([*facts, *retry_facts])
+    added_count = len(merged) - len(facts)
+    if added_count <= 0:
+        return merged, f"Coverage AI retry checked {len(uncovered)} missed span(s) and found no additional facts."
+    return (
+        merged,
+        f"Coverage AI retry checked {len(uncovered)} missed span(s) and added {added_count} fact(s). {retry_notice}",
+    )
+
+
+def backfill_uncovered_relevant_facts(
+    text: str,
+    facts: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    *,
+    allow_heuristic_backfill: bool = True,
+) -> tuple[list[dict[str, Any]], str]:
+    uncovered = uncovered_relevant_spans(text, facts)
+    spans = [span for span in sentence_spans(text) if is_continuity_relevant_span(span["text"])]
+    if not uncovered:
+        return facts, ""
+    if not allow_heuristic_backfill:
+        return facts, f"Coverage audit found {len(uncovered)} relevant span(s) without extracted facts; private backup reader is disabled."
+
+    return heuristic_backfill_uncovered_spans(facts, metadata, spans, uncovered)
+
+
+def heuristic_backfill_uncovered_spans(
+    facts: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    spans: list[dict[str, Any]],
+    uncovered: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    backfilled: list[dict[str, Any]] = []
+    for span in uncovered:
+        span_metadata = {
+            **metadata,
+            "line_start": span["line_start"],
+            "line_end": span["line_end"],
+            "char_start": span["char_start"],
+            "char_end": span["char_end"],
+        }
+        span_facts = heuristic_extract(span["text"], span_metadata, max_facts=8)
+        if not span_facts:
+            span_facts = [coverage_note_fact(span["text"], span_metadata)]
+        for fact in span_facts:
+            fact = dict(fact)
+            fact["extraction"] = "heuristic_backfill"
+            fact["confidence"] = min(float(fact.get("confidence", 0.5) or 0.5), 0.5)
+            backfilled.append(fact)
+
+    if not backfilled:
+        return facts, f"Coverage audit found {len(uncovered)} relevant line(s) without extracted facts."
+
+    merged = dedupe_fact_like_items([*facts, *backfilled])
+    added_count = len(merged) - len(facts)
+    if added_count <= 0:
+        return merged, f"Coverage audit checked {len(spans)} relevant span(s); no new facts were needed."
+    return (
+        merged,
+        (
+            f"Coverage audit checked {len(spans)} relevant span(s) and backfilled "
+            f"{added_count} low-confidence fact(s) from {len(uncovered)} missed span(s)."
+        ),
+    )
+
+
+def uncovered_relevant_spans(text: str, facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    spans = [span for span in sentence_spans(text) if is_continuity_relevant_span(span["text"])]
+    return [span for span in spans if not span_has_fact_coverage(span, facts)]
+
+
+def sentence_spans(text: str) -> list[dict[str, Any]]:
+    line_starts = text_line_starts(text)
+    spans = []
+    pattern = re.compile(r"\S.*?(?:[.!?](?=\s|$)|$)", re.DOTALL)
+    for match in pattern.finditer(text):
+        raw = match.group(0)
+        sentence = re.sub(r"\s+", " ", raw).strip()
+        if len(sentence) <= 8:
+            continue
+        start, end = match.span()
+        spans.append(
+            {
+                "text": sentence,
+                "char_start": start,
+                "char_end": end,
+                "line_start": line_number_for_offset(line_starts, start),
+                "line_end": line_number_for_offset(line_starts, max(start, end - 1)),
+            }
+        )
+    return spans
+
+
+def is_continuity_relevant_span(sentence: str) -> bool:
+    lowered = sentence.lower()
+    names = [name for name in extract_names(sentence) if name not in STOP_NAMES]
+    has_name = bool(names)
+    has_relationship = bool(relationship_terms_from_text(sentence))
+    has_status = bool(
+        re.search(
+            r"\b(?:is|was|becomes|became|remains|stays|belongs to|from)\b",
+            lowered,
+        )
+    )
+    has_possession = bool(re.search(r"\b(?:has|owns|carries|receives|gets|takes|loses|gives)\b", lowered))
+    has_lifecycle = bool(re.search(r"\b(?:dead|alive|missing|destroyed|broken|exiled|sealed|hidden|died|killed)\b", lowered))
+    has_rule = any(word in lowered for word in ["cannot", "can't", "never", "always", "must", "impossible", "curse", "oath", "law", "rule", "compact"])
+    has_knowledge = bool(re.search(r"\b(?:knows|knew|learns|learned|discovers|discovered|realizes|realized|found out)\b", lowered))
+    return has_name and (has_relationship or has_status or has_possession or has_lifecycle or has_rule or has_knowledge or len(names) >= 2)
+
+
+def span_has_fact_coverage(span: dict[str, Any], facts: list[dict[str, Any]]) -> bool:
+    for fact in facts:
+        if fact_overlaps_span(fact, span):
+            return True
+        evidence = str(fact.get("evidence", "")).strip()
+        if evidence and normalized_contains(span["text"], evidence):
+            return True
+    return False
+
+
+def fact_overlaps_span(fact: dict[str, Any], span: dict[str, Any]) -> bool:
+    fact_start = fact.get("char_start")
+    fact_end = fact.get("char_end")
+    if isinstance(fact_start, int) and isinstance(fact_end, int):
+        return fact_start < span["char_end"] and span["char_start"] < fact_end
+
+    line_start = fact.get("line_start")
+    line_end = fact.get("line_end") or line_start
+    if isinstance(line_start, int) and isinstance(line_end, int):
+        return line_start <= span["line_end"] and span["line_start"] <= line_end
+    return False
+
+
+def normalized_contains(haystack: str, needle: str) -> bool:
+    normalized_haystack = re.sub(r"\s+", " ", haystack).strip().lower()
+    normalized_needle = re.sub(r"\s+", " ", needle).strip().lower().rstrip(".")
+    return bool(normalized_needle and normalized_needle in normalized_haystack)
+
+
+def dedupe_fact_like_items(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = set()
+    deduped = []
+    for fact in facts:
+        key = (
+            str(fact.get("type", "")).lower(),
+            str(fact.get("subject", "")).lower(),
+            str(fact.get("predicate", "")).lower(),
+            str(fact.get("object", "")).lower(),
+            str(fact.get("value", "")).lower(),
+            fact.get("story_order", 0),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(fact)
+    return deduped
+
+
+def coverage_note_fact(sentence: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    names = [name for name in extract_names(sentence) if name not in STOP_NAMES]
+    subject = names[0] if names else "Scene"
+    return make_fact(
+        "event",
+        subject,
+        "mentions",
+        metadata,
+        object_=", ".join(names[1:4]),
+        value=trim_value(sentence),
+        evidence=sentence,
+        confidence=0.3,
+    )
 
 
 def extract_facts(
@@ -401,6 +617,7 @@ def heuristic_extract(text: str, metadata: dict[str, Any], *, max_facts: int = 9
         facts.extend(extract_knowledge(sentence, sentence_meta))
         facts.extend(extract_status(sentence, sentence_meta))
         facts.extend(extract_possessions(sentence, sentence_meta))
+        facts.extend(extract_locations(sentence, sentence_meta))
         facts.extend(extract_world_rules(sentence, sentence_meta))
         facts.extend(extract_events(sentence, sentence_meta))
 
@@ -494,12 +711,20 @@ def extract_knowledge(sentence: str, metadata: dict[str, Any]) -> list[dict[str,
 def extract_status(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     facts: list[dict[str, Any]] = []
     state_words = "dead|alive|missing|destroyed|broken|married|single|injured|blind|pregnant|exiled|sealed|hidden"
+    role_words = (
+        "student|teacher|doctor|heir|guard|soldier|servant|commoner|artificer|duelist|"
+        "prince|princess|crown prince|crown princess|queen|king|professor|headmistress|headmaster|registrar"
+    )
     pattern = re.compile(
         rf"\b(?P<a>{NAME_RE})\s+(?:is|was|becomes|became|remains|stays)\s+(?P<state>{state_words})\b",
         re.IGNORECASE,
     )
     role_pattern = re.compile(
-        rf"\b(?P<a>{NAME_RE})\s+(?:is|was|becomes|became|remains|stays)\s+(?:still\s+)?(?:a|an)\s+(?P<role>student|teacher|doctor|heir|guard|soldier|servant)\b",
+        rf"\b(?P<a>{NAME_RE})\s+(?:is|was|becomes|became|remains|stays)\s+(?:still\s+)?(?:a|an|the)?\s*(?P<role>{role_words})\b",
+        re.IGNORECASE,
+    )
+    affiliation_pattern = re.compile(
+        rf"\b(?P<a>{NAME_RE})(?:'s)?\s+(?:affiliation\s+(?:is|was)|belongs\s+to|belonged\s+to|is\s+of|was\s+of)\s+(?P<org>{NAME_RE})\b",
         re.IGNORECASE,
     )
     involvement_pattern = re.compile(
@@ -530,6 +755,17 @@ def extract_status(sentence: str, metadata: dict[str, Any]) -> list[dict[str, An
                 evidence=sentence,
             )
         )
+    for match in affiliation_pattern.finditer(sentence):
+        facts.append(
+            make_fact(
+                "status",
+                clean_name(match.group("a")),
+                "affiliation",
+                metadata,
+                value=clean_name(match.group("org")),
+                evidence=sentence,
+            )
+        )
     for match in involvement_pattern.finditer(sentence):
         status_value = "not involved" if match.group("neg") else "involved"
         facts.append(
@@ -551,6 +787,42 @@ def extract_status(sentence: str, metadata: dict[str, Any]) -> list[dict[str, An
                 "status",
                 metadata,
                 value="dead",
+                evidence=sentence,
+            )
+        )
+    return facts
+
+
+def extract_locations(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    origin_pattern = re.compile(
+        rf"\b(?P<a>{NAME_RE})\s+(?:is|was|came|comes|hails)\s+from\s+(?:the\s+)?(?P<place>{NAME_RE})\b",
+        re.IGNORECASE,
+    )
+    current_location_pattern = re.compile(
+        rf"\b(?P<a>{NAME_RE})\s+(?:woke|arrived|stood|waited|lived|studied|stayed|slept)\s+(?:at|in|inside|outside)\s+(?:the\s+)?(?P<place>{NAME_RE})\b",
+        re.IGNORECASE,
+    )
+
+    for match in origin_pattern.finditer(sentence):
+        facts.append(
+            make_fact(
+                "location",
+                clean_name(match.group("a")),
+                "origin",
+                metadata,
+                object_=clean_name(match.group("place")),
+                evidence=sentence,
+            )
+        )
+    for match in current_location_pattern.finditer(sentence):
+        facts.append(
+            make_fact(
+                "location",
+                clean_name(match.group("a")),
+                "current_location",
+                metadata,
+                object_=clean_name(match.group("place")),
                 evidence=sentence,
             )
         )
