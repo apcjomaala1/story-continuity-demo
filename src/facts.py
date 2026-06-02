@@ -6,9 +6,11 @@ from typing import Any
 
 from src.constants import (
     FACT_TYPES,
+    NAME_RE,
     RELATIONSHIP_DIMENSIONS,
     RELATIONSHIP_GENERIC_PREDICATES,
     RELATIONSHIP_ROLE_ALIASES,
+    STOP_NAMES,
 )
 from src.utils import (
     as_text,
@@ -326,6 +328,8 @@ def canonicalize_fact(fact: dict[str, Any]) -> dict[str, Any] | None:
     fact = normalize_canonical_slots(fact)
     if has_uncheckable_shape(fact):
         return None
+    if has_wrong_subject_evidence(fact):
+        return None
     if has_unsupported_claim_terms(fact):
         return None
     return fact
@@ -399,6 +403,34 @@ def has_uncheckable_shape(fact: dict[str, Any]) -> bool:
     if any(marker in f" {readable_predicate} " for marker in [" when ", " while ", " because ", " but ", " and "]):
         return True
     return len(re.findall(r"[a-zA-Z]+", readable_predicate)) > 4
+
+
+def has_wrong_subject_evidence(fact: dict[str, Any]) -> bool:
+    if fact.get("type") != "status":
+        return False
+    evidence = as_text(fact.get("evidence", ""))
+    if not evidence:
+        return False
+
+    subject = as_text(fact.get("subject", "")).lower()
+    subject_parts = [part.lower() for part in re.findall(r"[A-Za-z]+", subject) if len(part) > 1]
+    evidence_lower = evidence.lower()
+    if any(part in evidence_lower for part in subject_parts):
+        return False
+
+    if not evidence_mentions_person_reference(evidence_lower):
+        return True
+
+    evidence_names = [
+        name
+        for name in re.findall(NAME_RE, evidence)
+        if name not in STOP_NAMES and name.lower() != subject
+    ]
+    return bool(evidence_names)
+
+
+def evidence_mentions_person_reference(evidence: str) -> bool:
+    return bool(re.search(r"\b(?:she|her|he|him|his|they|them|their|student|candidate|heir|guard|teacher|doctor|soldier|servant)\b", evidence))
 
 
 def has_unsupported_claim_terms(fact: dict[str, Any]) -> bool:

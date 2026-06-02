@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src import extraction
+from src.continuity import check_continuity
 from src.constants import ProviderConfig
 from src.extraction import (
     attach_fact_line_refs,
@@ -196,3 +197,30 @@ def test_heuristic_extract_uses_object_for_origin_location() -> None:
         and fact["value"] == ""
         for fact in facts
     )
+
+
+def test_sample_source_and_continuation_have_deterministic_conflicts() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source_text = (root / "examples" / "sample_source.txt").read_text(encoding="utf-8")
+    continuation_text = (root / "examples" / "sample_continuation.txt").read_text(encoding="utf-8")
+    memory = extraction.attach_fact_line_refs(
+        source_text,
+        heuristic_extract(source_text, {"source": "source", "chapter": 1, "story_order": 1}, max_facts=200),
+    )
+    scene = extraction.attach_fact_line_refs(
+        continuation_text,
+        heuristic_extract(continuation_text, {"source": "continuation", "chapter": 2, "story_order": 2}, max_facts=200),
+    )
+
+    issues = check_continuity(continuation_text, scene, memory)
+    evidence = "\n".join(issue.evidence for issue in issues)
+
+    assert len(issues) >= 8
+    assert "Kael Maren's compass" in evidence
+    assert "Registrar Dahl" in evidence
+    assert "Sable Wren" in evidence
+    assert "Ticker" in evidence
+    assert "Dorien Hale" in evidence
+    assert "North corridor" in evidence
+    assert "The Compact" in evidence
+    assert "Ashenmere" in evidence

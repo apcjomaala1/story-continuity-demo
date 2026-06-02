@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -122,6 +124,61 @@ def apply_compact_styles() -> None:
         [data-baseweb="select"] > div,
         [data-baseweb="textarea"] textarea {
             border-radius: 8px;
+        }
+
+        .ll-workspace-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin: 0.25rem 0 0.85rem;
+        }
+
+        .ll-workspace-title span {
+            color: var(--text-color);
+            font-size: 1.15rem;
+            font-weight: 750;
+        }
+
+        .ll-workspace-title strong,
+        .ll-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 0.2rem 0.62rem;
+            border: 1px solid rgba(127, 127, 127, 0.22);
+            background: var(--secondary-background-color);
+            color: var(--text-color);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .ll-review-summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.45rem;
+            margin: 0.75rem 0;
+        }
+
+        .ll-review-stat {
+            border: 1px solid rgba(127, 127, 127, 0.22);
+            border-radius: 8px;
+            padding: 0.52rem 0.55rem;
+            background: var(--secondary-background-color);
+        }
+
+        .ll-review-stat span {
+            display: block;
+            color: rgba(127, 127, 127, 0.95);
+            font-size: 0.72rem;
+            font-weight: 700;
+        }
+
+        .ll-review-stat strong {
+            display: block;
+            margin-top: 0.12rem;
+            color: var(--text-color);
+            font-size: 1.05rem;
         }
         </style>
         """,
@@ -312,10 +369,13 @@ def render_model_selector(
     if options:
         choices = options if current in options or not current else [current, *options]
         index = choices.index(current) if current in choices else 0
-        selected = st.selectbox(label, choices, index=index, key=f"{setting_key}_select")
+        widget_key = f"{setting_key}_select_widget"
+        if st.session_state.get(widget_key) not in choices:
+            st.session_state[widget_key] = choices[index]
+        selected = st.selectbox(label, choices, key=widget_key)
         st.session_state[setting_key] = selected
     else:
-        st.text_input(label, key=setting_key)
+        provider_text_input(label, setting_key=setting_key)
 
     notice = st.session_state.get(notice_key, "")
     if notice:
@@ -323,6 +383,15 @@ def render_model_selector(
             st.warning(notice)
         else:
             st.caption(notice)
+
+
+def provider_text_input(label: str, *, setting_key: str, type: str = "default") -> str:
+    widget_key = f"{setting_key}_widget"
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = as_text(st.session_state.get(setting_key, ""))
+    value = st.text_input(label, type=type, key=widget_key)
+    st.session_state[setting_key] = value
+    return value
 
 
 def render_provider_sidebar() -> ProviderConfig:
@@ -374,7 +443,7 @@ def render_provider_sidebar() -> ProviderConfig:
 
         if mode == "Ollama API":
             st.info("Selected text is sent to the configured Ollama API endpoint.")
-            ollama_url = st.text_input("Ollama API base URL", key="provider_ollama_url")
+            ollama_url = provider_text_input("Ollama API base URL", setting_key="provider_ollama_url")
             render_model_selector(
                 "Ollama model",
                 setting_key="provider_ollama_model",
@@ -383,8 +452,8 @@ def render_provider_sidebar() -> ProviderConfig:
             )
         elif mode == "Gemini API":
             st.info("Selected text is sent to the configured Gemini API endpoint.")
-            gemini_url = st.text_input("Gemini API base URL", key="provider_gemini_url")
-            gemini_key = st.text_input("Gemini API key", type="password", key="provider_gemini_key")
+            gemini_url = provider_text_input("Gemini API base URL", setting_key="provider_gemini_url")
+            gemini_key = provider_text_input("Gemini API key", type="password", setting_key="provider_gemini_key")
             render_model_selector(
                 "Gemini model",
                 setting_key="provider_gemini_model",
@@ -393,8 +462,8 @@ def render_provider_sidebar() -> ProviderConfig:
             )
         elif mode == "Claude API":
             st.info("Selected text is sent to the configured Claude API endpoint.")
-            claude_url = st.text_input("Claude API base URL", key="provider_claude_url")
-            claude_key = st.text_input("Claude API key", type="password", key="provider_claude_key")
+            claude_url = provider_text_input("Claude API base URL", setting_key="provider_claude_url")
+            claude_key = provider_text_input("Claude API key", type="password", setting_key="provider_claude_key")
             render_model_selector(
                 "Claude model",
                 setting_key="provider_claude_model",
@@ -403,8 +472,8 @@ def render_provider_sidebar() -> ProviderConfig:
             )
         else:
             st.info("Selected text is sent to the configured OpenAI API endpoint.")
-            api_url = st.text_input("OpenAI API base URL", key="provider_api_url")
-            api_key = st.text_input("OpenAI API key", type="password", key="provider_api_key")
+            api_url = provider_text_input("OpenAI API base URL", setting_key="provider_api_url")
+            api_key = provider_text_input("OpenAI API key", type="password", setting_key="provider_api_key")
             render_model_selector(
                 "OpenAI model",
                 setting_key="provider_api_model",
@@ -489,6 +558,7 @@ def render_live_textarea(
     provider: ProviderConfig,
     seed_token: str = "",
     height: int = 360,
+    issue_lines: list[int] | None = None,
 ) -> str:
     profile = excerpt_profile(provider)
     state_key = f"{key}_value"
@@ -504,6 +574,7 @@ def render_live_textarea(
         placeholder=placeholder,
         height=height,
         suggested_chars=int(profile["recommended_chars"]),
+        issue_lines=issue_lines or [],
         seed_token=seed_token,
         default=current_value,
         key=key,
@@ -512,6 +583,15 @@ def render_live_textarea(
         st.session_state[state_key] = result
         return result
     return current_value
+
+
+def issue_line_numbers(issues: list[ContinuityIssue]) -> list[int]:
+    lines: list[int] = []
+    for issue in issues:
+        value = issue.scene_line
+        if isinstance(value, int) and value > 0 and value not in lines:
+            lines.append(value)
+    return sorted(lines)
 
 
 def render_chunking_option(key: str, text: str, provider: ProviderConfig) -> bool:
@@ -547,14 +627,17 @@ def render_chunking_option(key: str, text: str, provider: ProviderConfig) -> boo
 
 
 def render_scene_review_tab(provider: ProviderConfig) -> None:
-    st.subheader("Review a Scene")
-    st.write(
-        "Paste a chapter, scene, outline, character sheet, or lore note. "
-        "LoreLock pulls out possible story facts, checks them against what you have approved, "
-        "and lets you decide what becomes canon."
+    st.markdown(
+        '<div class="ll-workspace-title"><span>Scene Review</span>'
+        f'<strong>{len(st.session_state.memory)} saved facts</strong></div>',
+        unsafe_allow_html=True,
     )
 
-    uploaded = st.file_uploader("Optional draft file", type=["txt", "md"])
+    editor_col, review_col = st.columns([0.68, 0.32], gap="large")
+
+    with review_col:
+        uploaded = st.file_uploader("Draft file", type=["txt", "md"], label_visibility="collapsed")
+
     uploaded_text = ""
     seed_token = ""
     default_source = "draft scene"
@@ -563,49 +646,62 @@ def render_scene_review_tab(provider: ProviderConfig) -> None:
         default_source = uploaded.name
         seed_token = f"{uploaded.name}:{len(uploaded_text)}"
 
-    text = render_live_textarea(
-        "Scene or source text",
-        value=uploaded_text,
-        placeholder="Paste the scene, chapter, outline, character sheet, or lore note you want checked.",
-        key="review_text_live",
-        provider=provider,
-        seed_token=seed_token,
-    )
-    split_over_limit = render_chunking_option("review_text_live", text, provider)
+    with editor_col:
+        text = render_live_textarea(
+            "Draft text",
+            value=uploaded_text,
+            placeholder="Paste the scene, chapter, outline, character sheet, or lore note you want checked.",
+            key="review_text_live",
+            provider=provider,
+            seed_token=seed_token,
+            height=620,
+            issue_lines=issue_line_numbers(st.session_state.issues),
+        )
 
-    with st.expander("Scene details and optional overrides", expanded=False):
-        render_scene_metadata_summary(st.session_state.scene_metadata)
-        overrides = render_metadata_form("review", default_source=default_source)
+    with review_col:
+        with st.container(height=705):
+            st.markdown("#### Review")
+            split_over_limit = render_chunking_option("review_text_live", text, provider)
 
-    if st.button("Review this text", type="primary", use_container_width=True):
-        if not text.strip():
-            st.error("Paste or upload story text first.")
-        else:
-            with st.spinner("Reading the text, finding scene details, and checking continuity..."):
-                facts, issues, notice, debug, metadata = review_text_against_memory(
-                    text,
-                    overrides,
-                    default_source,
-                    provider,
-                    st.session_state.memory,
-                    split_over_limit=split_over_limit,
-                )
-            st.session_state.candidates = facts
-            st.session_state.scene_facts = facts
-            st.session_state.issues = issues
-            st.session_state.provider_notice = notice
-            st.session_state.provider_debug = debug
-            st.session_state.scene_metadata = metadata
-            st.session_state.reviewed_text = text
+            with st.expander("Scene details", expanded=False):
+                render_scene_metadata_summary(st.session_state.scene_metadata)
+                overrides = render_metadata_form("review", default_source=default_source)
 
-    render_provider_feedback("review")
+            if st.button("Review text", type="primary", use_container_width=True):
+                if not text.strip():
+                    st.error("Paste or upload story text first.")
+                else:
+                    with st.spinner("Reading, extracting facts, and checking continuity..."):
+                        facts, issues, notice, debug, metadata = review_text_against_memory(
+                            text,
+                            overrides,
+                            default_source,
+                            provider,
+                            st.session_state.memory,
+                            split_over_limit=split_over_limit,
+                        )
+                    st.session_state.candidates = facts
+                    st.session_state.scene_facts = facts
+                    st.session_state.issues = issues
+                    st.session_state.provider_notice = notice
+                    st.session_state.provider_debug = debug
+                    st.session_state.scene_metadata = metadata
+                    st.session_state.reviewed_text = text
+                    st.rerun()
 
-    with st.expander(f"Continuity notes ({len(st.session_state.issues)})", expanded=bool(st.session_state.issues)):
-        render_continuity_warnings(show_header=False)
-        if st.session_state.issues:
-            render_reviewed_text_lines(st.session_state.reviewed_text)
-    with st.expander(f"Possible story facts ({len(st.session_state.candidates)})", expanded=bool(st.session_state.candidates)):
-        render_candidate_facts(show_header=False)
+            render_provider_feedback("review")
+            render_review_summary()
+
+            facts_tab, issues_tab = st.tabs(
+                [
+                    f"Facts ({len(st.session_state.candidates)})",
+                    f"Issues ({len(st.session_state.issues)})",
+                ]
+            )
+            with facts_tab:
+                render_candidate_facts(show_header=False)
+            with issues_tab:
+                render_continuity_warnings(show_header=False)
 
 
 def review_text_against_memory(
@@ -620,10 +716,26 @@ def review_text_against_memory(
     inferred_metadata, metadata_notice, metadata_debug = infer_scene_metadata(text, provider)
     metadata = merge_scene_metadata(default_source, inferred_metadata, overrides)
     facts, notice, debug = extract_facts_for_text(text, metadata, provider, split_over_limit=split_over_limit)
-    issues = check_continuity(text, facts, memory) if memory else []
+    issues = check_continuity(text, facts, memory)
     combined_notice = " ".join(part for part in [metadata_notice, notice] if part)
     combined_debug = "\n\n".join(part for part in [metadata_debug, debug] if part)
     return facts, issues, combined_notice, combined_debug, metadata
+
+
+def render_review_summary() -> None:
+    line_count = len(issue_line_numbers(st.session_state.issues))
+    st.markdown(
+        textwrap.dedent(
+            f"""
+            <div class="ll-review-summary">
+              <div class="ll-review-stat"><span>Issues</span><strong>{len(st.session_state.issues)}</strong></div>
+              <div class="ll-review-stat"><span>Facts</span><strong>{len(st.session_state.candidates)}</strong></div>
+              <div class="ll-review-stat"><span>Lines</span><strong>{line_count}</strong></div>
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
+    )
 
 
 def render_metadata_form(prefix: str, default_source: str) -> dict[str, Any]:
@@ -708,7 +820,7 @@ def render_candidate_facts(*, show_header: bool = True) -> None:
 
     if show_header:
         st.subheader(f"Possible story facts: {len(candidates)}")
-    st.caption("Edit these suggestions before adding them. Delete rows you do not want, or uncheck Add.")
+    st.caption("Edit these suggestions before adding them. Delete wrong rows or uncheck Add to leave them out.")
 
     rows = [fact_to_editor_row(fact, include_add=True) for fact in candidates]
     edited_rows = st.data_editor(
@@ -722,6 +834,9 @@ def render_candidate_facts(*, show_header: bool = True) -> None:
     )
     edited_facts = editor_rows_to_facts(edited_rows, st.session_state.scene_metadata)
     st.session_state.candidates = edited_facts
+    st.session_state.scene_facts = edited_facts
+    if st.session_state.get("reviewed_text"):
+        st.session_state.issues = check_continuity(st.session_state.reviewed_text, edited_facts, st.session_state.memory)
 
     if st.button("Add selected facts to story memory", type="primary", use_container_width=True):
         existing_ids = {fact["id"] for fact in st.session_state.memory}
@@ -943,17 +1058,56 @@ def render_continuity_warnings(*, show_header: bool = True) -> None:
         severity_rank = {"high": 0, "medium": 1, "low": 2}
         for issue in sorted(st.session_state.issues, key=lambda item: severity_rank[item.severity]):
             with st.container(border=True):
-                st.markdown(f"**{issue.category}** - `{issue.severity.upper()}`")
+                st.markdown(
+                    f"**{html.escape(issue.category)}** {severity_badge(issue.severity)}",
+                    unsafe_allow_html=True,
+                )
                 st.write(issue.message)
                 refs = issue_line_refs(issue)
                 if refs:
                     st.markdown(refs, unsafe_allow_html=True)
-                st.caption(f"Where LoreLock noticed it: {issue.evidence}")
-                st.caption(f"Possible next step: {issue.suggestion}")
+                st.markdown("**Where LoreLock noticed it**")
+                render_issue_evidence(issue.evidence)
+                st.markdown("**Possible next step**")
+                st.write(issue.suggestion)
     elif st.session_state.scene_facts and not st.session_state.memory:
         st.info("No approved story memory yet, so this pass only found possible facts.")
     else:
         st.info("No warnings yet.")
+
+
+def severity_badge(severity: str) -> str:
+    colors = {
+        "high": ("#7f1d1d", "#fecaca"),
+        "medium": ("#713f12", "#fde68a"),
+        "low": ("#1e3a8a", "#bfdbfe"),
+    }
+    background, foreground = colors.get(severity, ("#374151", "#e5e7eb"))
+    return (
+        f'<span style="display:inline-block;margin-left:0.35rem;padding:0.08rem 0.45rem;'
+        f'border-radius:999px;background:{background};color:{foreground};'
+        f'font-size:0.72rem;font-weight:700;letter-spacing:0;">{html.escape(severity.upper())}</span>'
+    )
+
+
+def render_issue_evidence(evidence: str) -> None:
+    parsed = parse_issue_evidence(evidence)
+    if parsed:
+        for label, value in parsed:
+            st.markdown(f"**{label}:** {value}")
+        return
+    st.write(evidence)
+
+
+def parse_issue_evidence(evidence: str) -> list[tuple[str, str]]:
+    text = as_text(evidence).strip()
+    match = re.match(r"^(Earlier|Memory):\s*(.*?)\.\s*(Later|Scene):\s*(.*?)\.?$", text)
+    if not match:
+        return []
+    return [
+        (match.group(1), match.group(2).strip()),
+        (match.group(3), match.group(4).strip()),
+    ]
 
 
 def issue_line_refs(issue: ContinuityIssue) -> str:
@@ -972,26 +1126,26 @@ def render_reviewed_text_lines(text: str) -> None:
     rows = []
     for line_number, line in enumerate(text.splitlines() or [""], start=1):
         rows.append(
-            '<div class="ll-line" id="scene-line-{line_number}">'
-            '<span class="ll-line-num">{line_number}</span>'
+            f'<div class="ll-line" id="scene-line-{line_number}">'
+            f'<span class="ll-line-num">{line_number}</span>'
             '<span class="ll-line-text">{line}</span>'
             '</div>'.format(
-                line_number=line_number,
                 line=html.escape(line) or "&nbsp;",
             )
         )
-    st.markdown(
+    reviewed_text_html = textwrap.dedent(
         """
         <style>
         .ll-line-box {
-            border: 1px solid rgba(250, 250, 250, 0.16);
+            border: 1px solid rgba(127, 127, 127, 0.28);
             border-radius: 8px;
             max-height: 420px;
             overflow: auto;
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             font-size: 0.84rem;
             line-height: 1.45;
-            background: rgba(255, 255, 255, 0.025);
+            background: var(--secondary-background-color);
+            color: var(--text-color);
         }
         .ll-line {
             display: grid;
@@ -1002,23 +1156,25 @@ def render_reviewed_text_lines(text: str) -> None:
             white-space: pre-wrap;
         }
         .ll-line:target {
-            background: rgba(255, 218, 121, 0.22);
-            outline: 1px solid rgba(255, 218, 121, 0.55);
+            background: rgba(232, 185, 35, 0.22);
+            outline: 1px solid rgba(232, 185, 35, 0.55);
         }
         .ll-line-num {
-            color: rgba(250, 250, 250, 0.48);
+            color: var(--text-color);
+            opacity: 0.52;
             text-align: right;
             user-select: none;
         }
         .ll-line-text {
-            color: rgba(250, 250, 250, 0.9);
+            color: var(--text-color);
             overflow-wrap: anywhere;
         }
         </style>
         <div class="ll-line-box">
         """
-        + "\n".join(rows)
-        + "\n</div>",
+    ).strip()
+    st.markdown(
+        reviewed_text_html + "\n" + "\n".join(rows) + "\n</div>",
         unsafe_allow_html=True,
     )
 

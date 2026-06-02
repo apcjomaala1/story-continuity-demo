@@ -160,3 +160,81 @@ def test_same_status_split_between_object_and_value_does_not_conflict() -> None:
     issues = check_continuity("Seraphine Ardent's affiliation is House Ardent.", scene, memory)
 
     assert not [issue for issue in issues if issue.category == "Fact conflict"]
+
+
+def test_same_scene_fact_conflict_warns_without_memory() -> None:
+    scene = normalize_facts(
+        [
+            {"type": "trait", "subject": "Liora", "predicate": "hair_color", "value": "dark"},
+            {"type": "trait", "subject": "Liora", "predicate": "hair_color", "value": "red"},
+        ],
+        metadata(),
+    )
+
+    issues = check_continuity("Liora's hair was dark. Liora's hair was red.", scene, [])
+
+    assert any(issue.category == "Same-scene fact conflict" for issue in issues)
+
+
+def test_student_and_candidate_roles_do_not_conflict() -> None:
+    scene = normalize_facts(
+        [
+            {"type": "status", "subject": "Liora Vale", "predicate": "role", "value": "student"},
+            {"type": "status", "subject": "Liora Vale", "predicate": "role", "value": "blade-veil candidate"},
+        ],
+        metadata(),
+    )
+
+    issues = check_continuity("Liora Vale is a student and a blade-veil candidate.", scene, [])
+
+    assert not [issue for issue in issues if issue.category == "Same-scene fact conflict"]
+
+
+def test_student_and_first_year_student_roles_do_not_conflict() -> None:
+    scene = normalize_facts(
+        [
+            {"type": "status", "subject": "Liora Vale", "predicate": "role", "value": "student"},
+            {"type": "status", "subject": "Liora Vale", "predicate": "role", "value": "first-year student"},
+        ],
+        metadata(),
+    )
+
+    issues = check_continuity("Liora Vale is a first-year student.", scene, [])
+
+    assert not [issue for issue in issues if issue.category == "Same-scene fact conflict"]
+
+
+def test_same_scene_identity_drift_warns_without_memory() -> None:
+    issues = check_continuity("Caelan Ardent entered. Caelan Thorne followed.", [], [])
+
+    assert any(issue.category == "Same-scene identity drift" for issue in issues)
+
+
+def test_same_scene_setting_drift_warns_without_memory() -> None:
+    issues = check_continuity("Liora enrolled at Sunspire Academy. Veyrfall Academy locked its gates.", [], [])
+
+    assert any(issue.category == "Same-scene setting drift" for issue in issues)
+
+
+def test_prefix_name_does_not_trigger_same_scene_identity_drift() -> None:
+    """'Caelan Aer' is a prefix of 'Caelan Aer Thorne' — same person, not a drift."""
+    text = "Prince Caelan Aer Thorne crossed the Tide Gate without waiting for Quill to call him."
+    issues = check_continuity(text, [], [])
+
+    assert not [issue for issue in issues if issue.category in {"Same-scene identity drift", "Possible identity drift"}]
+
+
+def test_article_prefix_does_not_trigger_same_scene_setting_drift() -> None:
+    """'The Tide Gate' and 'Tide Gate' are the same place — the article shouldn't split them."""
+    text = "The Tide Gate stood at the center. Liora approached the Tide Gate carefully."
+    issues = check_continuity(text, [], [])
+
+    assert not [issue for issue in issues if issue.category in {"Same-scene setting drift", "Possible setting drift"}]
+
+
+def test_article_prefix_observatory_does_not_trigger_setting_drift() -> None:
+    """'The North Observatory' and 'North Observatory' are the same place."""
+    text = "The North Observatory was sealed sixteen years ago. She looked toward North Observatory with longing."
+    issues = check_continuity(text, [], [])
+
+    assert not [issue for issue in issues if issue.category in {"Same-scene setting drift", "Possible setting drift"}]

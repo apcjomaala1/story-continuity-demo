@@ -67,6 +67,7 @@ PLACE_SUFFIXES = {
 PLACE_RE = re.compile(
     rf"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){{0,2}}\s+(?:{'|'.join(sorted(PLACE_SUFFIXES))}))\b"
 )
+LEADING_ARTICLE_RE = re.compile(r"^(?:The|A|An|At|In|On|By|Near)\s+", re.IGNORECASE)
 POSSESSION_PRESENT = {"has", "owns", "carries", "receives", "gets", "takes", "gains", "gained", "possesses"}
 POSSESSION_ABSENT = {"loses", "lost", "gives", "gave", "sold", "destroyed"}
 
@@ -78,6 +79,7 @@ def check_continuity(
 ) -> list[ContinuityIssue]:
     scoped = scope_memory(scene_text, scene_facts, memory)
     issues: list[ContinuityIssue] = []
+    issues.extend(same_scene_fact_conflicts(scene_facts))
 
     for scene_fact in scene_facts:
         for memory_fact in scoped:
@@ -95,7 +97,45 @@ def check_continuity(
     issues.extend(world_rule_conflicts(scene_text, scoped))
     issues.extend(identity_name_conflicts(scene_text, memory))
     issues.extend(named_place_conflicts(scene_text, memory))
+    issues.extend(same_scene_identity_name_conflicts(scene_text))
+    issues.extend(same_scene_named_place_conflicts(scene_text))
     return dedupe_issues(issues)
+
+
+def same_scene_fact_conflicts(scene_facts: list[dict[str, Any]]) -> list[ContinuityIssue]:
+    issues = []
+    for index, first in enumerate(scene_facts):
+        for second in scene_facts[index + 1 :]:
+            if is_same_fact(first, second):
+                continue
+            issue = relationship_or_status_conflict(first, second)
+            if issue:
+                issues.append(
+                    issue_for_same_scene_conflict(
+                        issue,
+                        first,
+                        second,
+                        "Same-scene " + issue.category[:1].lower() + issue.category[1:],
+                    )
+                )
+    return issues
+
+
+def issue_for_same_scene_conflict(
+    issue: ContinuityIssue,
+    first: dict[str, Any],
+    second: dict[str, Any],
+    category: str,
+) -> ContinuityIssue:
+    return ContinuityIssue(
+        category=category,
+        severity=issue.severity,
+        message=issue.message.replace("approved memory", "another fact in this text"),
+        evidence=f"Earlier: {fact_label(first)}. Later: {fact_label(second)}.",
+        suggestion="In Possible story facts, edit the wrong row, delete it, or uncheck Add before approving selected facts.",
+        scene_line=second.get("line_start"),
+        memory_line=first.get("line_start"),
+    )
 
 
 def scope_memory(
@@ -122,7 +162,7 @@ def relationship_or_status_conflict(
     scene_fact: dict[str, Any],
     memory_fact: dict[str, Any],
 ) -> ContinuityIssue | None:
-    comparable_types = {"relationship", "status", "trait", "ability", "possession"}
+    comparable_types = {"relationship", "status", "trait", "ability", "possession", "location"}
     if scene_fact["type"] not in comparable_types or memory_fact["type"] not in comparable_types:
         return None
     if scene_fact["type"] != memory_fact["type"]:
@@ -135,6 +175,9 @@ def relationship_or_status_conflict(
         return possession_conflict(scene_fact, memory_fact)
     if scene_fact["predicate"].lower() != memory_fact["predicate"].lower():
         return None
+
+    if scene_fact["type"] == "status" and scene_fact["predicate"].lower() == "role":
+        return role_status_conflict(scene_fact, memory_fact)
 
     scene_value = comparable_fact_value(scene_fact)
     memory_value = comparable_fact_value(memory_fact)
@@ -162,6 +205,38 @@ def comparable_fact_value(fact: dict[str, Any]) -> str:
     if object_ and value:
         return f"{object_}|{value}"
     return value or object_
+
+
+def role_status_conflict(scene_fact: dict[str, Any], memory_fact: dict[str, Any]) -> ContinuityIssue | None:
+    scene_role = normalize_role_value(comparable_fact_value(scene_fact))
+    memory_role = normalize_role_value(comparable_fact_value(memory_fact))
+    if not scene_role or not memory_role or scene_role == memory_role:
+        return None
+    if role_values_compatible(scene_role, memory_role):
+        return None
+    return None
+
+
+def role_values_compatible(first: str, second: str) -> bool:
+    first_words = set(first.split())
+    second_words = set(second.split())
+    if first_words <= second_words or second_words <= first_words:
+        return True
+    if "student" in first_words and "student" in second_words:
+        return True
+    if "candidate" in first_words and "candidate" in second_words:
+        return True
+    if "candidate" in first_words and "student" in second_words:
+        return True
+    if "student" in first_words and "candidate" in second_words:
+        return True
+    return False
+
+
+def normalize_role_value(value: Any) -> str:
+    text = normalize_comparison_text(value).replace("-", " ")
+    text = re.sub(r"\b(?:a|an|the)\b", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_comparison_text(value: Any) -> str:
@@ -374,6 +449,27 @@ def identity_name_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> li
     return issues
 
 
+def same_scene_identity_name_conflicts(scene_text: str) -> list[ContinuityIssue]:
+    scene_names = indexed_person_names([(scene_text, scene_text, None)])
+    issues = []
+    for first_name, variants in scene_names.items():
+        entries = list(variants.values())
+        for index, first in enumerate(entries):
+            for second in entries[index + 1 :]:
+                issues.append(
+                    ContinuityIssue(
+                        category="Same-scene identity drift",
+                        severity="medium",
+                        message=f"{first['name']} and {second['name']} share a first name but use different family/name markers.",
+                        evidence=f"Earlier: {first['evidence']} Later: {second['evidence']}",
+                        suggestion="Check whether this text intentionally uses an alias/name change or accidentally changes the character identity.",
+                        scene_line=second["line"],
+                        memory_line=first["line"],
+                    )
+                )
+    return issues
+
+
 def named_place_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list[ContinuityIssue]:
     memory_places = indexed_places(memory_texts(memory))
     scene_places = indexed_places([(scene_text, scene_text, None)])
@@ -403,6 +499,33 @@ def named_place_conflicts(scene_text: str, memory: list[dict[str, Any]]) -> list
                     )
                 )
     return issues
+
+
+def same_scene_named_place_conflicts(scene_text: str) -> list[ContinuityIssue]:
+    scene_places = indexed_places([(scene_text, scene_text, None)])
+    issues = []
+    for suffix, variants in scene_places.items():
+        entries = list(variants.values())
+        for index, first in enumerate(entries):
+            for second in entries[index + 1 :]:
+                issues.append(
+                    ContinuityIssue(
+                        category="Same-scene setting drift",
+                        severity="medium",
+                        message=f"The text references both {first['name']} and {second['name']} as named {pluralize_suffix(suffix)}.",
+                        evidence=f"Earlier: {first['evidence']} Later: {second['evidence']}",
+                        suggestion="Check whether this is a new location, a renamed location, or an accidental setting change inside the same text.",
+                        scene_line=second["line"],
+                        memory_line=first["line"],
+                    )
+                )
+    return issues
+
+
+def pluralize_suffix(value: str) -> str:
+    if value.endswith("y"):
+        return value[:-1] + "ies"
+    return value + "s"
 
 
 def memory_texts(memory: list[dict[str, Any]]) -> list[tuple[str, str, int | None]]:
@@ -440,7 +563,39 @@ def indexed_person_names(texts: list[tuple[str, str, int | None]]) -> dict[str, 
                     "line": line_hint or line_number_for_snippet(text, display_name),
                 },
             )
-    return indexed
+    return _merge_prefix_name_variants(indexed)
+
+
+def _merge_prefix_name_variants(
+    indexed: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Merge name variants where a shorter name is a prefix of a longer one.
+
+    For example, if we see both "Caelan Aer" (first=caelan, last=aer) and
+    "Caelan Aer Thorne" (first=caelan, last=thorne), the shorter name is a
+    substring of the longer display name, so they refer to the same person.
+    Keep only the longest variant to avoid false identity-drift alerts.
+    """
+    merged: dict[str, dict[str, dict[str, Any]]] = {}
+    for first_name, variants in indexed.items():
+        if len(variants) <= 1:
+            merged[first_name] = variants
+            continue
+        # Sort variants by display-name length descending so longer names come first.
+        sorted_keys = sorted(variants, key=lambda k: len(variants[k]["name"]), reverse=True)
+        kept: dict[str, dict[str, Any]] = {}
+        for key in sorted_keys:
+            entry = variants[key]
+            display_lower = entry["name"].lower()
+            # Check if this name is a prefix/substring of any already-kept longer name.
+            is_prefix = any(
+                display_lower in kept_entry["name"].lower()
+                for kept_entry in kept.values()
+            )
+            if not is_prefix:
+                kept[key] = entry
+        merged[first_name] = kept
+    return merged
 
 
 def person_name_parts(name: str) -> tuple[str, str, str] | None:
@@ -460,14 +615,18 @@ def indexed_places(texts: list[tuple[str, str, int | None]]) -> dict[str, dict[s
     indexed: dict[str, dict[str, dict[str, Any]]] = {}
     for text, evidence, line_hint in texts:
         for match in PLACE_RE.finditer(text):
-            place = match.group(1)
+            raw_place = match.group(1)
+            # Strip leading articles so "The Tide Gate" and "Tide Gate" unify.
+            place = LEADING_ARTICLE_RE.sub("", raw_place)
             parts = place.split()
+            if not parts:
+                continue
             if any(part.isupper() and len(part) > 1 for part in parts):
                 continue
             suffix = parts[-1].lower()
             indexed.setdefault(suffix, {}).setdefault(
                 place.lower(),
-                {"name": place, "evidence": evidence_excerpt(evidence, place), "line": line_hint or line_number_for_snippet(text, place)},
+                {"name": place, "evidence": evidence_excerpt(evidence, raw_place), "line": line_hint or line_number_for_snippet(text, raw_place)},
             )
     return indexed
 
@@ -494,15 +653,48 @@ def evidence_excerpt(text: str, needle: str, *, radius: int = 90) -> str:
 
 
 def dedupe_issues(issues: list[ContinuityIssue]) -> list[ContinuityIssue]:
-    seen = set()
+    seen_exact: set[tuple[str, str, str]] = set()
+    seen_entity_pairs: set[tuple[str, ...]] = set()
     deduped = []
     for issue in issues:
-        key = (issue.category, issue.message, issue.evidence)
-        if key in seen:
+        exact_key = (issue.category, issue.message, issue.evidence)
+        if exact_key in seen_exact:
             continue
-        seen.add(key)
+        seen_exact.add(exact_key)
+        # Detect when two issues reference the same pair of named entities
+        # across different check categories (e.g. "Possible setting drift" and
+        # "Same-scene setting drift" for the same Sunspire↔Veyrfall pair).
+        entity_key = _issue_entity_pair_key(issue)
+        if entity_key and entity_key in seen_entity_pairs:
+            continue
+        if entity_key:
+            seen_entity_pairs.add(entity_key)
         deduped.append(issue)
     return deduped
+
+
+def _issue_entity_pair_key(issue: ContinuityIssue) -> tuple[str, ...] | None:
+    """Extract a normalized entity-pair key from a drift issue message.
+
+    For messages like 'The scene references Sunspire Academy, but approved
+    memory references Veyrfall Academy as a named academy' or 'Mara Auric and
+    Mara Venn share a first name...', pull out the two entity names so that
+    the same pair isn't reported twice from different check paths.
+    """
+    base = issue.category.lower().replace("same-scene ", "").replace("possible ", "")
+    if base not in ("setting drift", "identity drift"):
+        return None
+    # Try "X and Y share" pattern (same-scene identity drift)
+    m = re.match(r"^(.+?)\s+and\s+(.+?)\s+share\b", issue.message)
+    if m:
+        a, b = m.group(1).strip().lower(), m.group(2).strip().lower()
+        return (base, *sorted([a, b]))
+    # Try "references X, but ... references Y" pattern (memory drift)
+    m = re.match(r".*references\s+(.+?),\s+but.*references\s+(.+?)\s+as\b", issue.message)
+    if m:
+        a, b = m.group(1).strip().lower(), m.group(2).strip().lower()
+        return (base, *sorted([a, b]))
+    return None
 
 
 def is_same_fact(a: dict[str, Any], b: dict[str, Any]) -> bool:

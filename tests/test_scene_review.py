@@ -73,10 +73,12 @@ def test_scene_review_extracts_and_checks_against_memory(monkeypatch) -> None:
     assert calls["check"] == ("Mara is Dain's boss.", facts, memory)
 
 
-def test_scene_review_skips_check_when_memory_is_empty(monkeypatch) -> None:
+def test_scene_review_checks_same_text_when_memory_is_empty(monkeypatch) -> None:
     provider = make_provider()
     overrides = {"source": "", "chapter": "", "story_order": "", "scene_time": "", "location": "", "pov": ""}
     facts = [{"id": "fact-1", "type": "event"}]
+    issues = [object()]
+    calls = {}
 
     def fake_infer(text, provider_arg):
         return {}, "metadata notice", ""
@@ -84,12 +86,13 @@ def test_scene_review_skips_check_when_memory_is_empty(monkeypatch) -> None:
     def fake_extract(text, metadata_arg, provider_arg, *, split_over_limit):
         return facts, "notice", ""
 
-    def fail_check(*args, **kwargs):
-        raise AssertionError("empty memory should not be checked")
+    def fake_check(text, facts_arg, memory_arg):
+        calls["check"] = (text, facts_arg, memory_arg)
+        return issues
 
     monkeypatch.setattr(ui, "infer_scene_metadata", fake_infer)
     monkeypatch.setattr(ui, "extract_facts_for_text", fake_extract)
-    monkeypatch.setattr(ui, "check_continuity", fail_check)
+    monkeypatch.setattr(ui, "check_continuity", fake_check)
 
     result = ui.review_text_against_memory(
         "Mara arrived.",
@@ -102,7 +105,7 @@ def test_scene_review_skips_check_when_memory_is_empty(monkeypatch) -> None:
 
     assert result == (
         facts,
-        [],
+        issues,
         "metadata notice notice",
         "",
         {
@@ -114,3 +117,4 @@ def test_scene_review_skips_check_when_memory_is_empty(monkeypatch) -> None:
             "pov": "",
         },
     )
+    assert calls["check"] == ("Mara arrived.", facts, [])

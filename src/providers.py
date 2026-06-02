@@ -248,8 +248,16 @@ def extraction_system_prompt(provider: ProviderConfig) -> str:
     profile = excerpt_profile(provider)
     return (
         "You extract structured continuity facts for fiction editing. "
+        "Your goal is COMPREHENSIVE coverage: a later scene will be checked against these facts "
+        "to find contradictions, so every concrete, verifiable detail matters. "
         "Return only JSON with a top-level key named facts. "
-        "Do not invent facts. Keep each fact grounded in the provided text. "
+        "Grounding rules: "
+        "(1) Extract explicitly stated facts (confidence 1.0). "
+        "(2) Also extract strongly implied facts that any attentive reader would infer from the text "
+        "(confidence 0.8) — e.g. if the text describes tide cliffs, harbors, and ocean spray, "
+        "infer the setting is coastal; if a bell 'breathes' and changes color, infer it is alive/magical; "
+        "if someone is called 'Prince' and 'heir to the Storm Seat', infer royal lineage. "
+        "(3) Never fabricate details that have no textual basis at all. "
         "Normalize before output: every fact must be one atomic, directly checkable claim. "
         "Use canonical snake_case predicates for the real attribute, relation, action, or rule; "
         "never use wrapper predicates like has_*, have_*, is_*, was_*, or became_*. "
@@ -280,12 +288,58 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
     return (
         f"Metadata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
         f"Maximum facts: {profile['max_facts']}\n\n"
-        "Normalize then emit:\n"
+        "YOUR TASK: Extract every concrete, verifiable detail from this text that a continuity checker "
+        "could use to catch contradictions in a later scene. Be thorough. Err on the side of extracting "
+        "more facts rather than fewer. A missing fact means a missed contradiction.\n\n"
+        "EXTRACTION CHECKLIST — sweep the text for each category:\n"
+        "1. IDENTITY: Full names (including family/house names), titles, aliases, honorifics for every named character.\n"
+        "2. APPEARANCE: Hair color/style/length, eye color, skin tone, build, height, distinguishing marks for every described character.\n"
+        "3. ROLES & RANKS: Academy roles, candidacies, seat rankings (e.g. 'first seat', 'fifth seat'), "
+        "occupations, titles (prince, headmistress, registrar, professor).\n"
+        "4. AFFILIATIONS: House membership, faction, unaligned status, scholarship status.\n"
+        "5. RELATIONSHIPS: Family ties (parent, sibling), romantic connections, friendships, rivalries, enmities, "
+        "mentor/student bonds. Include the emotional quality if stated (tense, warm, hostile).\n"
+        "6. POSSESSIONS & ARTIFACTS: Every named object, key, weapon, creature/companion, signet, comb, trunk. "
+        "Include material, color, shape, and any magical properties described.\n"
+        "7. NAMED LOCATIONS: Every named place (academy name, gates, towers, dormitories, halls, observatories, "
+        "orchards, bridges, lakes, libraries, spires). Include physical descriptions and properties "
+        "(coastal vs desert, suspended lake, whale-bone arches, folding bridge, etc.).\n"
+        "8. SETTING PROPERTIES: Geography (coastal cliffs, desert dunes, ocean), architecture style, "
+        "magical atmosphere (living bells, star-water, animated armor).\n"
+        "9. WORLD RULES & MAGIC SYSTEMS: Any stated rule, restriction, oath, compact, magical law, "
+        "gate behavior, or condition (e.g. 'gate speaks legal names', 'opens at first frost', "
+        "'walls bleed on founding anniversaries').\n"
+        "10. EVENTS & ACTIONS: Concrete things that happen: arrivals, announcements, threats, "
+        "visions, oaths sworn, seals placed, disappearances, deaths (real or faked).\n"
+        "11. VERBATIM MESSAGES: Any written warning, prophecy, threat, or inscription — "
+        "extract the exact wording as the evidence.\n"
+        "12. KNOWLEDGE & SECRETS: Who knows what, who learned what, what was revealed, "
+        "what remains hidden. Include the knower explicitly.\n"
+        "13. PERSONALITY & BEHAVIOR: Stated personality traits (secretive, cheerful, cold, warm), "
+        "habits, characteristic behaviors, attitudes toward others or things.\n"
+        "14. TIMELINE & BACKSTORY: Ages, durations ('sixteen years ago'), temporal markers "
+        "('first day', 'before dawn'), sequence of past events.\n"
+        "15. IMPLIED FACTS (confidence 0.8): Extract facts that are strongly implied but not "
+        "explicitly stated. These are critical for continuity checking. Examples:\n"
+        "   - Text says 'tide cliffs', 'harbor', 'ocean struck the rocks' → location academy geography value='coastal'.\n"
+        "   - Text says the bell 'breathed' and 'changed color' → trait academy_bell nature value='living/magical'.\n"
+        "   - Text says 'Prince Caelan, heir to the Storm Seat' → status Caelan title value='prince'; status Caelan lineage value='royal'.\n"
+        "   - Text says 'dark-haired like the queen in portraits' → trait Caelan hair_color value='dark'; relationship Caelan mother queen.\n"
+        "   - Text says she 'had never stood inside a school of magic before' → status Liora enrollment_status value='new student / first day'.\n"
+        "   - Text says 'mainland bridge folded into the water at moonrise' → trait mainland_bridge behavior value='folds into water at moonrise'.\n"
+        "   - Text says 'Glassmere hung like a lens of captured sky' → trait Glassmere nature value='suspended lake'.\n"
+        "   - Text says someone 'spoke only in gestures' around a character → trait character communication value='uses gestures not speech'.\n\n"
+        "CONFIDENCE GUIDE:\n"
+        "- 1.0 = directly stated in the text (e.g. 'Mara Venn, scholarship student').\n"
+        "- 0.8 = strongly implied, any reader would agree (e.g. coastal setting from ocean/cliffs/harbor descriptions).\n"
+        "- 0.6 = probable inference but debatable (use sparingly, only for important continuity details).\n"
+        "- Do NOT extract speculative or thematic interpretations.\n\n"
+        "NORMALIZATION RULES:\n"
         "- One fact = one claim. Split mixed sentences; skip vague summaries, mood, narration, and unsupported inference.\n"
         "- No type=character. Profile data becomes status, trait, ability, possession, or location.\n"
         "- Strip helper verbs from predicates: has_age -> age, was_student -> role, has_hair_color -> hair_color.\n"
         "- Type map: relationship A->B role; knowledge knower learned/knows info; status age/role/life_status/affiliation; "
-        "trait hair_color/height/build; ability ability/skill/limitation; possession owns/carries/lost/gained item; "
+        "trait hair_color/height/build/personality; ability ability/skill/limitation; possession owns/carries/lost/gained item; "
         "location current_location/residence/origin; event concrete_action target; world_rule rule/restriction topic; "
         "timeline before/after/during/same_time_as/story_order.\n"
         "- Slot discipline is strict. For status, trait, and ability facts, put the attribute result in value and leave object empty. "
@@ -295,7 +349,9 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
         "- For possession facts, put the item in object and leave value empty. Different owned items are separate facts, not conflicts.\n"
         "- Use object for targets/items/places/topics/info; use value for short states/attributes/roles. "
         "Use both only when the shape needs both, such as relationship or family_business_involvement.\n"
-        "- Knowledge subject is the explicit knower/learner, not necessarily the speaker. known_by lists only explicit knowers.\n\n"
+        "- Knowledge subject is the explicit knower/learner, not necessarily the speaker. known_by lists only explicit knowers.\n"
+        "- If a sentence names multiple people, attach status, role, trait, ability, and possession facts to the person the phrase "
+        "grammatically describes. Do not assign one character's role to the POV character or nearest earlier name.\n\n"
         "Examples:\n"
         "- 'Reika is 26' -> status Reika age = 26.\n"
         "- 'Seraphine belongs to House Ardent' -> status Seraphine affiliation value=House Ardent, object empty.\n"
@@ -303,7 +359,12 @@ def extraction_user_prompt(text: str, metadata: dict[str, Any], provider: Provid
         "- 'Liora owns an iron key' -> possession Liora owns object=iron key, value empty.\n"
         "- 'Sena was a student when she met Kaito and was not involved in the family business' -> "
         "status Sena role=student; event Sena met Kaito; status Sena family_business_involvement family business=not involved.\n"
-        "- 'A is B's lover and boss' -> one relationship fact with relation_types ['lover','boss'] or two relationship facts.\n\n"
+        "- 'A is B's lover and boss' -> one relationship fact with relation_types ['lover','boss'] or two relationship facts.\n"
+        "- 'The Tide Gate is two arches of whale bone' -> trait Tide Gate material value='whale bone'; trait Tide Gate structure value='two arches grown together'.\n"
+        "- 'RETURN THE SEALED STAR OR THE PRINCE DROWNS' -> event warning inscription value='RETURN THE SEALED STAR OR THE PRINCE DROWNS'.\n"
+        "- 'Dorian was secretive and cold' -> trait Dorian personality value='secretive'; trait Dorian personality value='cold'.\n"
+        "- 'Pip is a brass mechanical kestrel' -> trait Pip species value='mechanical kestrel'; trait Pip material value='brass'.\n"
+        "- 'Third seat: Caelan Thorne' -> status Caelan Thorne ranking value='third seat'.\n\n"
         f"Return JSON matching this shape:\n{json.dumps(schema, indent=2)}\n\n"
         f"Text:\n{text}"
     )
@@ -456,7 +517,7 @@ def default_provider_settings() -> dict[str, Any]:
         "api_key": os.getenv("OPENAI_API_KEY", ""),
         "api_model": env_or_default("OPENAI_MODEL", "gpt-4o-mini"),
         "fallback_to_heuristic": True,
-        "retry_missed_with_ai": False,
+        "retry_missed_with_ai": True,
     }
 
 
@@ -535,12 +596,20 @@ def ensure_provider_settings_state(settings_file: Path | None = None) -> None:
 
     settings_file = settings_file or PROVIDER_SETTINGS_FILE
     defaults = default_provider_settings()
+    loaded_settings = load_provider_settings_from_disk(settings_file)
     settings_key = str(settings_file.resolve())
 
     if st.session_state.get("provider_settings_loaded_from") != settings_key:
-        for key, value in load_provider_settings_from_disk(settings_file).items():
+        for key, value in loaded_settings.items():
             st.session_state[f"provider_{key}"] = value
+            st.session_state.pop(f"provider_{key}_widget", None)
+            st.session_state.pop(f"provider_{key}_select_widget", None)
         st.session_state.provider_settings_loaded_from = settings_key
+
+    for key, value in loaded_settings.items():
+        state_key = f"provider_{key}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = value
 
     for key in PROVIDER_BASE_URL_KEYS:
         state_key = f"provider_{key}"

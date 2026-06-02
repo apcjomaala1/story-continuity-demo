@@ -32,3 +32,4 @@ def test_extraction_prompt_pins_status_location_and_possession_slots() -> None:
     assert "For status, trait, and ability facts, put the attribute result in value and leave object empty" in prompt
     assert "Use location origin for birthplace/hometown/origin places, not status origin" in prompt
     assert "For possession facts, put the item in object and leave value empty" in prompt
+    assert "Do not assign one character's role to the POV character or nearest earlier name" in prompt

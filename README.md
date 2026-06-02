@@ -4,6 +4,19 @@ A generic Streamlit demo for a lightweight story continuity agent.
 
 LoreLock is no longer seeded with a specific story. You paste or upload story material, the app extracts candidate continuity facts, you approve the facts that should become memory, and then the app checks new scenes against that approved memory.
 
+## Working Prototype
+
+Prototype repository placeholder: `https://github.com/<your-username>/story-continuity-demo`
+
+Run the local web demo with:
+
+```powershell
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Then open the local URL printed by Streamlit.
+
 ## What It Does
 
 1. Ingests arbitrary story text, outlines, character sheets, or lore notes.
@@ -11,6 +24,23 @@ LoreLock is no longer seeded with a specific story. You paste or upload story ma
 3. Lets the writer approve or reject those facts.
 4. Stores approved memory locally in the Streamlit session, with optional local JSON save.
 5. Checks draft scenes for possible continuity conflicts.
+
+## System Architecture
+
+LoreLock uses a simple agent pipeline:
+
+```text
+User story text
+  -> Streamlit interface
+  -> metadata inference and provider extraction
+  -> canonical fact normalization
+  -> human approval
+  -> local JSON story memory
+  -> deterministic continuity checker
+  -> warnings with evidence and suggested next actions
+```
+
+The LLM/provider layer is used to propose structured facts. The continuity checker is deterministic and explainable, so final warnings come from local decision rules rather than free-form model judgment.
 
 ## AI Provider Options
 
@@ -46,6 +76,14 @@ The main story text boxes use a small local component so character counts update
 
 Relationship facts are stored as distinct roles on the same subject/object edge. For example, `lover` and `boss` can both apply to the same character pair without being treated as a contradiction, while explicitly conflicting statuses such as `wife` versus `girlfriend` still produce a warning.
 
+## Libraries Used
+
+- **Python**: application and agent workflow.
+- **Streamlit**: local web interface and editable fact tables.
+- **urllib.request**: provider HTTP calls without a large orchestration framework.
+- **pytest**: automated tests for extraction, normalization, provider settings, model fetching, and continuity checks.
+- **Optional provider APIs**: Ollama, Gemini, Claude, and OpenAI-compatible chat/model endpoints.
+
 ## Run
 
 ```powershell
@@ -64,12 +102,30 @@ $env:ANTHROPIC_API_KEY="..."
 $env:CLAUDE_MODEL="claude-sonnet-4-6"
 ```
 
+## Demo Flow
+
+1. Start the app with `streamlit run app.py`.
+2. Select a project folder and reading engine in the sidebar.
+3. Use **Standard** extraction depth for the class demo.
+4. Paste story source material into the scene review workflow.
+5. Extract candidate memory and approve useful facts.
+6. Open **Memory Graph** to show the approved structured facts.
+7. Paste a draft scene with intentional contradictions.
+8. Run the check and explain the warnings, evidence, and suggestions.
+
 ## Project Shape
 
-- `app.py` - Streamlit app, extraction providers, local heuristic extractor, continuity checker
+- `app.py` - application entry point
+- `src/ui.py` - Streamlit UI, project folders, memory editing, and review workflow
+- `src/providers.py` - provider settings, model fetching, HTTP calls, and debug reporting
+- `src/extraction.py` - metadata inference, LLM extraction orchestration, chunking, and heuristic fallback
+- `src/facts.py` - fact creation, canonicalization, validation, relationship expansion, and deduplication
+- `src/continuity.py` - deterministic continuity checker
 - `components/live_textarea/` - local textarea component with live character counting
 - `docs/erd.md` - conceptual ERD for the full continuity memory model
 - `docs/demo-plan.md` - presentation-oriented demo plan
+- `PROJECT_REPORT.md` - ANLYTC4 project paper draft
+- `tests/` - pytest suite for agent behavior and supporting utilities
 - `data/` - optional local memory saves and provider settings; JSON files in this folder are gitignored
 
 ## Privacy Notes

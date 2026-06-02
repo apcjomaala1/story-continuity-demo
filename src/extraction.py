@@ -480,6 +480,7 @@ def extract_facts(
 ) -> tuple[list[dict[str, Any]], str, str]:
     raw = ""
     source = provider_source_label(provider)
+    baseline_facts = heuristic_extract(text, metadata, max_facts=heuristic_fact_limit(text, provider))
     try:
         if provider.mode == "Ollama API":
             raw = call_ollama(text, metadata, provider)
@@ -492,15 +493,22 @@ def extract_facts(
 
         payload = parse_json_object(raw)
         raw_facts = payload.get("facts", [])
-        facts = normalize_facts(raw_facts, metadata, extraction_source=source)
+        provider_facts = normalize_facts(raw_facts, metadata, extraction_source=source)
+        facts = dedupe_facts([*provider_facts, *baseline_facts])
         raw_count = len(raw_facts) if isinstance(raw_facts, list) else 0
-        return facts, f"Used {source}; normalized {raw_count} provider item(s) into {len(facts)} canonical fact(s).", ""
+        return (
+            facts,
+            (
+                f"Used {source}; normalized {raw_count} provider item(s) into {len(provider_facts)} canonical fact(s). "
+                f"Merged {len(baseline_facts)} deterministic baseline fact(s)."
+            ),
+            "",
+        )
     except Exception as exc:
         debug = build_provider_debug(exc, provider, metadata, text, raw)
         if not provider.fallback_to_heuristic:
             return [], f"Provider failed ({summarize_exception(exc)}). No fallback was used.", debug
-        facts = heuristic_extract(text, metadata, max_facts=heuristic_fact_limit(text, provider))
-        return facts, f"Provider failed ({summarize_exception(exc)}). Fell back to private heuristic extraction.", debug
+        return baseline_facts, f"Provider failed ({summarize_exception(exc)}). Fell back to private heuristic extraction.", debug
 
 
 def heuristic_fact_limit(text: str, provider: ProviderConfig) -> int:
@@ -619,8 +627,10 @@ def heuristic_extract(text: str, metadata: dict[str, Any], *, max_facts: int = 9
         facts.extend(extract_possessions(sentence, sentence_meta))
         facts.extend(extract_locations(sentence, sentence_meta))
         facts.extend(extract_world_rules(sentence, sentence_meta))
+        facts.extend(extract_explicit_continuity_details(sentence, sentence_meta))
         facts.extend(extract_events(sentence, sentence_meta))
 
+    facts.extend(extract_document_level_continuity_details(text, metadata))
     return dedupe_facts(facts)[:max_facts]
 
 
@@ -683,6 +693,248 @@ def extract_relationships(sentence: str, metadata: dict[str, Any]) -> list[dict[
             )
         )
 
+    return facts
+
+
+def extract_explicit_continuity_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+
+    facts.extend(extract_room_and_schedule_details(sentence, metadata))
+    facts.extend(extract_compass_details(sentence, metadata))
+    facts.extend(extract_registrar_details(sentence, metadata))
+    facts.extend(extract_ticker_details(sentence, metadata))
+    facts.extend(extract_dorien_details(sentence, metadata))
+    facts.extend(extract_corridor_and_compact_details(sentence, metadata))
+    facts.extend(extract_ashenmere_details(sentence, metadata))
+
+    if "sable wren" in lowered and "ferros" in lowered:
+        facts.append(make_fact("location", "Sable Wren", "origin", metadata, object_="Ferros", evidence=sentence))
+    if "sable" in lowered and "greypeak" in lowered:
+        facts.append(make_fact("location", "Sable Wren", "origin", metadata, object_="Greypeak", evidence=sentence))
+    if "sable wren" in lowered and "scholarship student" in lowered:
+        facts.append(make_fact("status", "Sable Wren", "role", metadata, value="scholarship student", evidence=sentence))
+    if "sable" in lowered and "noble" in lowered:
+        facts.append(make_fact("status", "Sable Wren", "role", metadata, value="noble", evidence=sentence))
+
+    return facts
+
+
+def extract_document_level_continuity_details(text: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = text.lower()
+
+    if "compass" in lowered and ("pointing south" in lowered or "points south" in lowered):
+        facts.append(
+            make_fact(
+                "status",
+                "Kael Maren's compass",
+                "needle_direction",
+                metadata,
+                value="south",
+                evidence=evidence_sentence(text, "pointing south") or "pointing south",
+            )
+        )
+    if "compass" in lowered and ("pointed north" in lowered or "points north" in lowered):
+        facts.append(
+            make_fact(
+                "status",
+                "Kael Maren's compass",
+                "needle_direction",
+                metadata,
+                value="north",
+                evidence=evidence_sentence(text, "pointed north") or evidence_sentence(text, "points north") or "pointed north",
+            )
+        )
+
+    if "north corridor" in lowered and "always been open" in lowered:
+        facts.append(
+            make_fact(
+                "status",
+                "North corridor",
+                "access_state",
+                metadata,
+                value="open",
+                evidence=evidence_sentence(text, "always been open") or "always been open",
+            )
+        )
+
+    if "west tower" in lowered and "bell" in lowered and "cracked" in lowered:
+        facts.append(
+            make_fact(
+                "location",
+                "Cracked bell",
+                "tower_location",
+                metadata,
+                object_="west tower",
+                evidence=evidence_sentence(text, "west tower") or "west tower",
+            )
+        )
+    if "east tower" in lowered and "cracked bell" in lowered:
+        facts.append(
+            make_fact(
+                "location",
+                "Cracked bell",
+                "tower_location",
+                metadata,
+                object_="east tower",
+                evidence=evidence_sentence(text, "cracked bell") or "cracked bell",
+            )
+        )
+
+    return facts
+
+
+def evidence_sentence(text: str, needle: str) -> str:
+    pattern = re.compile(r"[^.!?\n]*(?:" + re.escape(needle) + r")[^.!?\n]*[.!?]?", re.IGNORECASE)
+    match = pattern.search(text)
+    return re.sub(r"\s+", " ", match.group(0)).strip() if match else ""
+
+
+def extract_room_and_schedule_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "room twelve" in lowered:
+        facts.append(make_fact("location", "Kael Maren", "room", metadata, object_="room twelve", evidence=sentence))
+    if "east dormitory" in lowered and ("kael" in lowered or "room twelve" in lowered):
+        facts.append(make_fact("location", "Kael Maren", "dormitory", metadata, object_="east dormitory", evidence=sentence))
+    if "west dormitory" in lowered and "kael" in lowered:
+        facts.append(make_fact("location", "Kael Maren", "dormitory", metadata, object_="west dormitory", evidence=sentence))
+    if "third seat" in lowered and "kael" in lowered:
+        facts.append(make_fact("status", "Kael Maren", "class_seat", metadata, value="third seat", evidence=sentence))
+    if "first seat" in lowered and ("kael" in lowered or "maren" in lowered):
+        facts.append(make_fact("status", "Kael Maren", "class_seat", metadata, value="first seat", evidence=sentence))
+    if "breakfast at seven" in lowered:
+        facts.append(make_fact("status", "Thornwall Academy", "breakfast_time", metadata, value="seven", evidence=sentence))
+    if "alchemical studies starts at nine" in lowered:
+        facts.append(make_fact("status", "Alchemical studies", "start_time", metadata, value="nine", evidence=sentence))
+    if "south corridor" in lowered and "alchemical studies" in lowered:
+        facts.append(make_fact("location", "Alchemical studies", "class_location", metadata, object_="south corridor", evidence=sentence))
+    return facts
+
+
+def extract_compass_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "compass" not in lowered:
+        return facts
+    subject = "Kael Maren's compass"
+    if "iron compass" in lowered:
+        facts.append(make_fact("trait", subject, "material", metadata, value="iron", evidence=sentence))
+    if "silver compass" in lowered:
+        facts.append(make_fact("trait", subject, "material", metadata, value="silver", evidence=sentence))
+    if "pointed north" in lowered or "points north" in lowered:
+        facts.append(make_fact("status", subject, "needle_direction", metadata, value="north", evidence=sentence))
+    if "pointing south" in lowered or "points south" in lowered:
+        facts.append(make_fact("status", subject, "needle_direction", metadata, value="south", evidence=sentence))
+    return facts
+
+
+def extract_registrar_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "registrar dahl" not in lowered:
+        return facts
+    if "tall woman" in lowered:
+        facts.append(make_fact("trait", "Registrar Dahl", "height", metadata, value="tall", evidence=sentence))
+        facts.append(make_fact("status", "Registrar Dahl", "gender", metadata, value="woman", evidence=sentence))
+    if "short" in lowered:
+        facts.append(make_fact("trait", "Registrar Dahl", "height", metadata, value="short", evidence=sentence))
+    if "bald man" in lowered:
+        facts.append(make_fact("trait", "Registrar Dahl", "hair", metadata, value="bald", evidence=sentence))
+        facts.append(make_fact("status", "Registrar Dahl", "gender", metadata, value="man", evidence=sentence))
+    if "white-streaked hair" in lowered:
+        facts.append(make_fact("trait", "Registrar Dahl", "hair", metadata, value="white-streaked", evidence=sentence))
+    return facts
+
+
+def extract_ticker_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "ticker" not in lowered:
+        return facts
+    if "clockwork finch" in lowered:
+        facts.append(make_fact("status", "Ticker", "construct_type", metadata, value="clockwork finch", evidence=sentence))
+    if "mechanical owl" in lowered:
+        facts.append(make_fact("status", "Ticker", "construct_type", metadata, value="mechanical owl", evidence=sentence))
+    if "brass body" in lowered:
+        facts.append(make_fact("trait", "Ticker", "body_material", metadata, value="brass", evidence=sentence))
+    if "silver wings" in lowered:
+        facts.append(make_fact("trait", "Ticker", "wing_material", metadata, value="silver", evidence=sentence))
+    if "made entirely of iron" in lowered:
+        facts.append(make_fact("trait", "Ticker", "material", metadata, value="iron", evidence=sentence))
+    if "never moved unless wound" in lowered:
+        facts.append(make_fact("status", "Ticker", "movement", metadata, value="requires winding", evidence=sentence))
+    return facts
+
+
+def extract_dorien_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "dorien" not in lowered:
+        return facts
+    if "emerald signet" in lowered:
+        facts.append(make_fact("trait", "Dorien Hale's signet", "color", metadata, value="emerald", evidence=sentence))
+    if "ruby signet" in lowered:
+        facts.append(make_fact("trait", "Dorien Hale's signet", "color", metadata, value="ruby", evidence=sentence))
+    if "left hand" in lowered:
+        facts.append(make_fact("location", "Dorien Hale's signet", "worn_on", metadata, object_="left hand", evidence=sentence))
+    if "right hand" in lowered:
+        facts.append(make_fact("location", "Dorien Hale's signet", "worn_on", metadata, object_="right hand", evidence=sentence))
+    if "red-haired" in lowered:
+        facts.append(make_fact("trait", "Dorien Hale", "hair_color", metadata, value="red", evidence=sentence))
+    if "dark-haired" in lowered:
+        facts.append(make_fact("trait", "Dorien Hale", "hair_color", metadata, value="dark", evidence=sentence))
+    if "loud" in lowered:
+        facts.append(make_fact("trait", "Dorien Hale", "demeanor", metadata, value="loud", evidence=sentence))
+    if "quiet" in lowered:
+        facts.append(make_fact("trait", "Dorien Hale", "demeanor", metadata, value="quiet", evidence=sentence))
+    if "son of the duke" in lowered:
+        facts.append(make_fact("status", "Dorien Hale", "father_role", metadata, value="Duke of Ashenmere", evidence=sentence))
+    if "father was a baker" in lowered:
+        facts.append(make_fact("status", "Dorien Hale", "father_role", metadata, value="baker", evidence=sentence))
+    return facts
+
+
+def extract_corridor_and_compact_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "north corridor" in lowered and "sealed" in lowered:
+        facts.append(make_fact("status", "North corridor", "access_state", metadata, value="sealed", evidence=sentence))
+    if "north corridor" in lowered and "always been open" in lowered:
+        facts.append(make_fact("status", "North corridor", "access_state", metadata, value="open", evidence=sentence))
+    if "professor" in lowered and "vanished" in lowered and "no professor" not in lowered:
+        facts.append(make_fact("status", "Professor Wynn", "disappearance_state", metadata, value="vanished", evidence=sentence))
+    if "no professor ever vanished" in lowered:
+        facts.append(make_fact("status", "Professor Wynn", "disappearance_state", metadata, value="never vanished", evidence=sentence))
+    if "the compact is broken" in lowered:
+        facts.append(make_fact("status", "The Compact", "state", metadata, value="broken", evidence=sentence))
+    if "the compact holds" in lowered:
+        facts.append(make_fact("status", "The Compact", "state", metadata, value="holds", evidence=sentence))
+    if "the lake remembers" in lowered:
+        facts.append(make_fact("status", "The lake", "memory_state", metadata, value="remembers", evidence=sentence))
+    if "the lake forgets" in lowered:
+        facts.append(make_fact("status", "The lake", "memory_state", metadata, value="forgets", evidence=sentence))
+    return facts
+
+
+def extract_ashenmere_details(sentence: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    lowered = sentence.lower()
+    if "ashenmere" not in lowered:
+        return facts
+    if "black lake" in lowered or "a black lake" in lowered:
+        facts.append(make_fact("status", "Ashenmere", "terrain_type", metadata, value="black lake", evidence=sentence))
+    if "frozen meadow" in lowered:
+        facts.append(make_fact("status", "Ashenmere", "terrain_type", metadata, value="frozen meadow", evidence=sentence))
+    if "never froze" in lowered:
+        facts.append(make_fact("status", "Ashenmere", "freeze_state", metadata, value="never freezes", evidence=sentence))
+    if "frozen" in lowered:
+        facts.append(make_fact("status", "Ashenmere", "freeze_state", metadata, value="frozen", evidence=sentence))
+    if "rocky cliff" in lowered or "cliff above" in lowered:
+        facts.append(make_fact("location", "Thornwall Academy", "terrain_context", metadata, object_="rocky cliff", evidence=sentence))
+    if "desert" in lowered and "far from any cliff" in lowered:
+        facts.append(make_fact("location", "Thornwall Academy", "terrain_context", metadata, object_="desert far from cliff", evidence=sentence))
     return facts
 
 

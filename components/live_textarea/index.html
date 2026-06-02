@@ -7,13 +7,16 @@
       :root {
         color-scheme: light dark;
         --ink: #17212b;
-        --muted: #667085;
-        --line: #d8dee8;
+        --muted: #7a8190;
+        --line: #dfe3eb;
         --field: #ffffff;
-        --focus: #2563eb;
-        --ok-bg: #f8fafc;
-        --ok-line: #cbd5e1;
-        --ok-fg: #334155;
+        --gutter: #f7f7fb;
+        --focus: #8b5cf6;
+        --issue: rgba(245, 158, 11, 0.18);
+        --issue-line: rgba(245, 158, 11, 0.75);
+        --ok-bg: #ecfdf3;
+        --ok-line: #bbf7d0;
+        --ok-fg: #067647;
         --warn-bg: #fffbeb;
         --warn-line: #d97706;
         --warn-fg: #92400e;
@@ -25,13 +28,16 @@
       @media (prefers-color-scheme: dark) {
         :root {
           --ink: #f8fafc;
-          --muted: #cbd5e1;
+          --muted: #94a3b8;
           --line: #334155;
           --field: #0f172a;
-          --focus: #60a5fa;
-          --ok-bg: #111827;
-          --ok-line: #334155;
-          --ok-fg: #e2e8f0;
+          --gutter: #111827;
+          --focus: #a78bfa;
+          --issue: rgba(245, 158, 11, 0.22);
+          --issue-line: rgba(251, 191, 36, 0.85);
+          --ok-bg: #052e1a;
+          --ok-line: #047857;
+          --ok-fg: #bbf7d0;
           --warn-bg: #451a03;
           --warn-line: #f59e0b;
           --warn-fg: #fde68a;
@@ -47,47 +53,144 @@
 
       body {
         margin: 0;
-        padding: 0;
         background: transparent;
         color: var(--ink);
-        font-family: Arial, Helvetica, sans-serif;
+        font-family: Inter, Arial, Helvetica, sans-serif;
+      }
+
+      .shell {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--field);
+      }
+
+      .shell:focus-within {
+        border-color: var(--focus);
+        box-shadow: 0 0 0 1px var(--focus);
+      }
+
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 2.35rem;
+        padding: 0.48rem 0.72rem;
+        border-bottom: 1px solid var(--line);
+        background: var(--field);
       }
 
       label {
-        display: block;
-        margin-bottom: 0.35rem;
         color: var(--ink);
-        font-size: 0.86rem;
-        font-weight: 600;
+        font-size: 0.84rem;
+        font-weight: 750;
+      }
+
+      .saved {
+        border-radius: 999px;
+        padding: 0.22rem 0.62rem;
+        background: var(--ok-bg);
+        color: var(--ok-fg);
+        font-size: 0.78rem;
+        font-weight: 750;
+      }
+
+      .editor {
+        display: grid;
+        grid-template-columns: 3.35rem minmax(0, 1fr);
+        background: var(--field);
+      }
+
+      .gutter {
+        overflow: hidden;
+        padding: 0.72rem 0.58rem 0.72rem 0.2rem;
+        border-right: 1px solid var(--line);
+        background: var(--gutter);
+        color: var(--muted);
+        font: 0.93rem/1.65 Consolas, "Cascadia Mono", Menlo, monospace;
+        text-align: right;
+        user-select: none;
+        white-space: pre;
+      }
+
+      .pane {
+        position: relative;
+        overflow: hidden;
+        background: var(--field);
+      }
+
+      .highlights {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        padding: 0.72rem 0;
+        pointer-events: none;
+        font: 0.93rem/1.65 Consolas, "Cascadia Mono", Menlo, monospace;
+        white-space: pre;
+      }
+
+      .mark {
+        border-left: 3px solid transparent;
+        box-sizing: border-box;
+      }
+
+      .mirror {
+        position: absolute;
+        top: 0;
+        left: 0;
+        visibility: hidden;
+        pointer-events: none;
+        box-sizing: border-box;
+        font: 0.93rem/1.65 Consolas, "Cascadia Mono", Menlo, monospace;
+        padding: 0.72rem 0.95rem;
+        border: 0;
+        overflow: hidden;
+        tab-size: 2;
+      }
+
+      .mirror-line {
+        width: 100%;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        box-sizing: border-box;
+      }
+
+      .gutter-line {
+        display: flex;
+        justify-content: flex-end;
+        align-items: flex-start;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .mark.issue {
+        border-left-color: var(--issue-line);
+        background: var(--issue);
       }
 
       textarea {
+        position: relative;
         display: block;
         width: 100%;
-        min-height: 180px;
-        padding: 0.7rem 0.8rem;
-        border: 1px solid var(--line);
-        border-radius: 0.45rem;
-        background: var(--field);
+        height: 100%;
+        min-height: 220px;
+        padding: 0.72rem 0.95rem;
+        border: 0;
+        background: transparent;
         color: var(--ink);
-        font: 0.82rem/1.38 Arial, Helvetica, sans-serif;
-        resize: vertical;
+        font: 0.93rem/1.65 Consolas, "Cascadia Mono", Menlo, monospace;
         outline: none;
-      }
-
-      textarea:focus {
-        border-color: var(--focus);
-        box-shadow: 0 0 0 1px var(--focus);
+        overflow: auto;
+        resize: none;
+        tab-size: 2;
       }
 
       .counter {
         display: flex;
         justify-content: space-between;
         gap: 0.75rem;
-        margin-top: 0.4rem;
-        padding: 0.38rem 0.55rem;
-        border: 1px solid var(--counter-line);
-        border-radius: 0.4rem;
+        padding: 0.4rem 0.62rem;
+        border-top: 1px solid var(--counter-line);
         background: var(--counter-bg);
         color: var(--counter-fg);
         font-size: 0.78rem;
@@ -95,32 +198,46 @@
       }
 
       .count {
-        font-weight: 700;
+        font-weight: 750;
       }
 
       .hint {
-        color: inherit;
         opacity: 0.82;
         white-space: nowrap;
       }
     </style>
   </head>
   <body>
-    <label id="label" for="textarea"></label>
-    <textarea id="textarea"></textarea>
-    <div id="counter" class="counter">
-      <span id="count" class="count">0 chars</span>
-      <span id="hint" class="hint"></span>
+    <div class="shell">
+      <div class="head">
+        <label id="label" for="textarea"></label>
+        <span id="saved" class="saved">Saved</span>
+      </div>
+      <div class="editor">
+        <div id="gutter" class="gutter"></div>
+        <div class="pane">
+          <div id="mirror" class="mirror"></div>
+          <div id="highlights" class="highlights"></div>
+          <textarea id="textarea" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div id="counter" class="counter">
+        <span id="count" class="count">0 chars</span>
+        <span id="hint" class="hint"></span>
+      </div>
     </div>
 
     <script>
       const textarea = document.getElementById("textarea");
       const label = document.getElementById("label");
+      const gutter = document.getElementById("gutter");
+      const highlights = document.getElementById("highlights");
       const counter = document.getElementById("counter");
       const count = document.getElementById("count");
       const hint = document.getElementById("hint");
 
       let suggestedChars = 4000;
+      let issueLines = new Set();
       let initialized = false;
       let lastSeedToken = "";
       let sendTimer = null;
@@ -133,12 +250,57 @@
       }
 
       function setFrameHeight() {
-        const height = document.documentElement.scrollHeight;
-        post("streamlit:setFrameHeight", { height });
+        post("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight });
       }
 
       function formatNumber(value) {
         return new Intl.NumberFormat().format(value);
+      }
+
+      const mirror = document.getElementById("mirror");
+
+      function updateGutterAndHighlights() {
+        const text = textarea.value;
+        const lines = text.split("\n");
+        
+        // Sync mirror width with the actual client width of the textarea
+        mirror.style.width = textarea.clientWidth + "px";
+        
+        // Populate the mirror element to measure line heights under wrapping
+        mirror.innerHTML = "";
+        const lineElements = [];
+        for (let i = 0; i < lines.length; i++) {
+          const div = document.createElement("div");
+          div.className = "mirror-line";
+          div.textContent = lines[i] === "" ? "\n" : lines[i];
+          mirror.appendChild(div);
+          lineElements.push(div);
+        }
+        
+        // Retrieve client heights of each line under wrapping
+        const heights = lineElements.map(el => el.getBoundingClientRect().height);
+        
+        // Populate gutter elements with matched heights
+        let gutterHTML = "";
+        for (let i = 0; i < lines.length; i++) {
+          const lineNum = i + 1;
+          gutterHTML += `<div class="gutter-line" style="height: ${heights[i]}px;">${lineNum}</div>`;
+        }
+        gutter.innerHTML = gutterHTML;
+        
+        // Populate highlights elements with matched heights
+        let highlightsHTML = "";
+        for (let i = 0; i < lines.length; i++) {
+          const lineNum = i + 1;
+          const hasIssue = issueLines.has(lineNum);
+          highlightsHTML += `<div class="mark${hasIssue ? " issue" : ""}" style="height: ${heights[i]}px;"></div>`;
+        }
+        highlights.innerHTML = highlightsHTML;
+      }
+
+      function syncScroll() {
+        gutter.scrollTop = textarea.scrollTop;
+        highlights.style.transform = `translateY(${-textarea.scrollTop}px)`;
       }
 
       function updateCounter() {
@@ -168,6 +330,13 @@
         hint.textContent = state;
       }
 
+      function renderEditorChrome() {
+        updateGutterAndHighlights();
+        updateCounter();
+        syncScroll();
+        setFrameHeight();
+      }
+
       function sendValue() {
         post("streamlit:setComponentValue", { value: textarea.value });
       }
@@ -180,7 +349,6 @@
       function announceReady() {
         post("streamlit:componentReady", { apiVersion: 1 });
         setFrameHeight();
-
         readyAttempts += 1;
         if (!hasRendered && readyAttempts < 80) {
           readyTimer = window.setTimeout(announceReady, 250);
@@ -193,7 +361,6 @@
         if (match) {
           return match[1].split("").map(part => parseInt(part + part, 16));
         }
-
         match = color.match(/^#([0-9a-f]{6})$/i);
         if (match) {
           return [
@@ -202,12 +369,10 @@
             parseInt(match[1].slice(4, 6), 16),
           ];
         }
-
         match = color.match(/^rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/i);
         if (match) {
           return [Number(match[1]), Number(match[2]), Number(match[3])];
         }
-
         return null;
       }
 
@@ -223,54 +388,36 @@
 
       function themeIsDark(theme) {
         const base = String(theme.base || "").toLowerCase();
-        if (base === "dark") {
-          return true;
-        }
-        if (base === "light") {
-          return false;
-        }
-
+        if (base === "dark") return true;
+        if (base === "light") return false;
         const background = parseColor(theme.backgroundColor || theme.secondaryBackgroundColor);
-        if (background) {
-          return luminance(background) < 0.42;
-        }
-
-        return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        return background ? luminance(background) < 0.42 : false;
       }
 
       function applyTheme(theme) {
-        if (!theme) {
-          return;
-        }
-
+        if (!theme) return;
         const root = document.documentElement;
         const isDark = themeIsDark(theme);
         const text = theme.textColor || (isDark ? "#f8fafc" : "#17212b");
-        const background = theme.secondaryBackgroundColor || theme.backgroundColor || (isDark ? "#0f172a" : "#ffffff");
-        const border = isDark ? "#334155" : "#d8dee8";
+        const field = theme.backgroundColor || (isDark ? "#0f172a" : "#ffffff");
+        const gutterBg = theme.secondaryBackgroundColor || (isDark ? "#111827" : "#f7f7fb");
+        const border = isDark ? "#334155" : "#dfe3eb";
 
         root.style.colorScheme = isDark ? "dark" : "light";
         root.style.setProperty("--ink", text);
-        root.style.setProperty("--field", background);
+        root.style.setProperty("--field", field);
+        root.style.setProperty("--gutter", gutterBg);
         root.style.setProperty("--line", border);
-        root.style.setProperty("--focus", theme.primaryColor || (isDark ? "#60a5fa" : "#2563eb"));
-        root.style.setProperty("--ok-bg", background);
-        root.style.setProperty("--ok-line", border);
-        root.style.setProperty("--ok-fg", text);
-        root.style.setProperty("--warn-bg", isDark ? "#451a03" : "#fffbeb");
-        root.style.setProperty("--warn-line", isDark ? "#f59e0b" : "#d97706");
-        root.style.setProperty("--warn-fg", isDark ? "#fde68a" : "#92400e");
-        root.style.setProperty("--over-bg", isDark ? "#450a0a" : "#fef2f2");
-        root.style.setProperty("--over-line", isDark ? "#ef4444" : "#dc2626");
-        root.style.setProperty("--over-fg", isDark ? "#fecaca" : "#991b1b");
+        root.style.setProperty("--focus", theme.primaryColor || (isDark ? "#a78bfa" : "#8b5cf6"));
+        root.style.setProperty("--muted", isDark ? "#94a3b8" : "#7a8190");
       }
 
       textarea.addEventListener("input", () => {
-        updateCounter();
+        renderEditorChrome();
         scheduleSend();
-        setFrameHeight();
       });
 
+      textarea.addEventListener("scroll", syncScroll);
       textarea.addEventListener("blur", sendValue);
 
       window.addEventListener("message", event => {
@@ -284,9 +431,12 @@
         const args = event.data.args || {};
         applyTheme(event.data.theme);
         suggestedChars = Number(args.suggested_chars || suggestedChars || 4000);
+        issueLines = new Set((args.issue_lines || []).map(Number).filter(Number.isFinite));
         label.textContent = args.label || "";
         textarea.placeholder = args.placeholder || "";
-        textarea.style.height = Number(args.height || 360) + "px";
+        textarea.style.height = Number(args.height || 520) + "px";
+        gutter.style.height = Number(args.height || 520) + "px";
+        highlights.style.height = Number(args.height || 520) + "px";
 
         const incomingValue = typeof args.value === "string" ? args.value : "";
         const seedToken = String(args.seed_token || "");
@@ -297,8 +447,7 @@
           lastSeedToken = seedToken;
         }
 
-        updateCounter();
-        setFrameHeight();
+        renderEditorChrome();
       });
 
       announceReady();

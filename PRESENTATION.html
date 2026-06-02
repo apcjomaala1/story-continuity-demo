@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoreLock Presentation</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111315;
+      --panel: #1d2328;
+      --panel-2: #26313a;
+      --text: #f2f5f3;
+      --muted: #b8c2bd;
+      --line: #46515c;
+      --accent: #7cc6a4;
+      --accent-2: #e6b85c;
+      --warn: #f27f72;
+      --shadow: rgba(0, 0, 0, 0.36);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(110deg, rgba(124, 198, 164, 0.13), transparent 36%),
+        linear-gradient(250deg, rgba(230, 184, 92, 0.14), transparent 34%),
+        var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    .deck {
+      height: 100vh;
+      width: 100vw;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    .slide {
+      display: none;
+      min-height: 0;
+      padding: clamp(28px, 5vw, 72px);
+      align-items: center;
+      justify-content: center;
+    }
+
+    .slide.active {
+      display: flex;
+    }
+
+    .frame {
+      width: min(1120px, 100%);
+    }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--accent);
+      font-size: clamp(13px, 1.5vw, 17px);
+      font-weight: 760;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      max-width: 980px;
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: clamp(44px, 7.2vw, 92px);
+    }
+
+    h2 {
+      font-size: clamp(34px, 5.4vw, 66px);
+    }
+
+    .lead {
+      margin: 24px 0 0;
+      max-width: 900px;
+      color: var(--muted);
+      font-size: clamp(20px, 2.2vw, 30px);
+      line-height: 1.34;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 34px;
+      color: var(--text);
+      font-size: 17px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 34px;
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      min-height: 152px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      background: rgba(29, 35, 40, 0.86);
+      box-shadow: 0 24px 70px var(--shadow);
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--text);
+      font-size: clamp(20px, 2vw, 25px);
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      font-size: clamp(17px, 1.55vw, 21px);
+      line-height: 1.35;
+    }
+
+    .card p {
+      margin: 0;
+    }
+
+    ul {
+      margin: 26px 0 0;
+      padding-left: 1.1em;
+    }
+
+    li {
+      margin: 13px 0;
+      color: var(--muted);
+      font-size: clamp(21px, 2.1vw, 30px);
+      line-height: 1.3;
+    }
+
+    li::marker {
+      color: var(--accent);
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 36px;
+    }
+
+    .step {
+      min-height: 145px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: rgba(38, 49, 58, 0.82);
+    }
+
+    .step span {
+      color: var(--accent-2);
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .step strong {
+      display: block;
+      margin-top: 12px;
+      font-size: clamp(18px, 1.6vw, 23px);
+    }
+
+    .step p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: clamp(15px, 1.2vw, 18px);
+      line-height: 1.35;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+      gap: 36px;
+      align-items: center;
+      margin-top: 26px;
+    }
+
+    .diagram {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .diagram-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      margin: 10px 0;
+    }
+
+    .box {
+      min-height: 52px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 18px;
+    }
+
+    .arrow {
+      color: var(--accent);
+      text-align: center;
+      font-weight: 900;
+      font-size: 22px;
+    }
+
+    .highlight {
+      color: var(--accent);
+    }
+
+    .warning {
+      color: var(--warn);
+    }
+
+    .footer {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 0 18px;
+      color: var(--muted);
+      background: rgba(17, 19, 21, 0.86);
+      font-size: 14px;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button {
+      width: 38px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .notes {
+      position: fixed;
+      right: 18px;
+      bottom: 70px;
+      width: min(430px, calc(100vw - 36px));
+      max-height: 34vh;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: rgba(17, 19, 21, 0.96);
+      box-shadow: 0 20px 60px var(--shadow);
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .notes[hidden] {
+      display: none;
+    }
+
+    .notes strong {
+      color: var(--text);
+    }
+
+    @media (max-width: 900px) {
+      body {
+        overflow: auto;
+      }
+
+      .deck {
+        min-height: 100vh;
+        height: auto;
+      }
+
+      .slide {
+        min-height: calc(100vh - 54px);
+      }
+
+      .grid,
+      .grid.three,
+      .split,
+      .workflow {
+        grid-template-columns: 1fr;
+      }
+
+      .workflow {
+        gap: 10px;
+      }
+
+      .step {
+        min-height: auto;
+      }
+    }
+
+    @media print {
+      body {
+        overflow: visible;
+        background: #fff;
+        color: #111;
+      }
+
+      .deck {
+        display: block;
+        height: auto;
+      }
+
+      .slide,
+      .slide.active {
+        display: flex;
+        min-height: 100vh;
+        page-break-after: always;
+        color: #111;
+        background: #fff;
+      }
+
+      .card,
+      .step,
+      .diagram,
+      .box {
+        box-shadow: none;
+        background: #fff;
+        color: #111;
+      }
+
+      .lead,
+      li,
+      .card p,
+      .card li,
+      .step p,
+      .footer {
+        color: #333;
+      }
+
+      .footer,
+      .notes {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-live="polite">
+    <section class="slide active" data-notes="Open with the project identity: LoreLock is a continuity assistant for writers. Emphasize that it is an agentic prototype, not just a chatbot.">
+      <div class="frame">
+        <p class="eyebrow">ANLYTC4 Individual AI Agent Project</p>
+        <h1>LoreLock: Story Continuity AI Agent</h1>
+        <p class="lead">A lightweight assistant that remembers approved story facts and flags possible contradictions in new draft scenes.</p>
+        <div class="meta">
+          <span class="pill">Student: [Your Name]</span>
+          <span class="pill">Streamlit prototype</span>
+          <span class="pill">Human-approved memory</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="State the pain clearly. Writers do not only forget major plot points; they miss small inconsistencies caused by drafting, revising, and writing scenes out of order.">
+      <div class="frame">
+        <p class="eyebrow">Problem</p>
+        <h2>Long stories create a continuity memory burden.</h2>
+        <div class="grid">
+          <div class="card">
+            <strong>What changes during drafting</strong>
+            <p>Relationships, secrets, names, locations, timelines, object ownership, character status, and world rules.</p>
+          </div>
+          <div class="card">
+            <strong>What goes wrong</strong>
+            <p>A character knows a secret too early, a destroyed object reappears, or a renamed location drifts between drafts.</p>
+          </div>
+          <div class="card">
+            <strong>Target users</strong>
+            <p>Fiction writers, editors, beta readers, writing students, and small story teams.</p>
+          </div>
+          <div class="card">
+            <strong>Project scope</strong>
+            <p>The system flags risks. It does not rewrite scenes or decide whether a contradiction is intentional.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="This is the core agent design. The system perceives text, extracts facts, stores approved memory, scopes relevant memory, and checks the scene.">
+      <div class="frame">
+        <p class="eyebrow">Agent Goal</p>
+        <h2>Protect story consistency while keeping the writer in control.</h2>
+        <div class="workflow">
+          <div class="step">
+            <span>01</span>
+            <strong>Read text</strong>
+            <p>User submits story material, lore notes, or a new draft scene.</p>
+          </div>
+          <div class="step">
+            <span>02</span>
+            <strong>Extract facts</strong>
+            <p>LLM provider or local fallback proposes structured continuity facts.</p>
+          </div>
+          <div class="step">
+            <span>03</span>
+            <strong>Approve memory</strong>
+            <p>The user reviews, edits, and accepts only facts that should become canon.</p>
+          </div>
+          <div class="step">
+            <span>04</span>
+            <strong>Check scene</strong>
+            <p>Relevant approved memory is compared against the submitted scene.</p>
+          </div>
+          <div class="step">
+            <span>05</span>
+            <strong>Report risks</strong>
+            <p>Warnings include evidence, severity, line references, and next actions.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Emphasize separation of AI and deterministic logic. The LLM helps read text, but Python rules make final warning decisions.">
+      <div class="frame">
+        <p class="eyebrow">Design Choice</p>
+        <h2>AI extraction, deterministic judgment.</h2>
+        <div class="split">
+          <div>
+            <ul>
+              <li>Provider output must be JSON, grounded, atomic, and normalized.</li>
+              <li>Facts pass through validation before they can become memory.</li>
+              <li>Continuity warnings are produced by explainable Python rules.</li>
+            </ul>
+          </div>
+          <div class="diagram">
+            <div class="diagram-row">
+              <div class="box">Story text</div>
+              <div class="arrow">&gt;</div>
+              <div class="box">Candidate facts</div>
+            </div>
+            <div class="diagram-row">
+              <div class="box">Canonicalization gate</div>
+              <div class="arrow">&gt;</div>
+              <div class="box">Approved memory</div>
+            </div>
+            <div class="diagram-row">
+              <div class="box">New scene facts</div>
+              <div class="arrow">&gt;</div>
+              <div class="box">Rule-based warnings</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Walk through the architecture at a high level. Keep it simple: UI, providers/fallback, facts, memory, continuity checker.">
+      <div class="frame">
+        <p class="eyebrow">System Architecture</p>
+        <h2>A local Streamlit app with modular Python services.</h2>
+        <div class="grid three">
+          <div class="card">
+            <strong>Interface</strong>
+            <p><span class="highlight">app.py</span> starts the app. <span class="highlight">src/ui.py</span> handles the Streamlit workflow, provider controls, and memory editing.</p>
+          </div>
+          <div class="card">
+            <strong>Reading engines</strong>
+            <p>Supports Ollama, Gemini, Claude, OpenAI-compatible APIs, and a private heuristic fallback.</p>
+          </div>
+          <div class="card">
+            <strong>Extraction</strong>
+            <p><span class="highlight">src/extraction.py</span> infers metadata, chunks input, calls providers, and recovers missed lines.</p>
+          </div>
+          <div class="card">
+            <strong>Facts</strong>
+            <p><span class="highlight">src/facts.py</span> creates, validates, deduplicates, and canonicalizes fact objects.</p>
+          </div>
+          <div class="card">
+            <strong>Memory</strong>
+            <p>Approved facts are saved locally as JSON in the selected project folder.</p>
+          </div>
+          <div class="card">
+            <strong>Checker</strong>
+            <p><span class="highlight">src/continuity.py</span> detects conflicts, risks, identity drift, and setting drift.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="List the warning categories. This is the practical value of the app: it turns story facts into checkable risk types.">
+      <div class="frame">
+        <p class="eyebrow">What LoreLock Detects</p>
+        <h2>Warnings are specific, explainable, and reviewable.</h2>
+        <ul>
+          <li><span class="highlight">Relationship conflicts:</span> wife versus girlfriend, friend versus enemy.</li>
+          <li><span class="highlight">Fact conflicts:</span> status, trait, ability, possession, or lifecycle changes.</li>
+          <li><span class="highlight">Knowledge leaks:</span> a character knows information before the approved reveal point.</li>
+          <li><span class="highlight">World-rule risks:</span> a scene touches a topic governed by a restrictive rule.</li>
+          <li><span class="highlight">Drift checks:</span> possible identity drift or setting drift across drafts.</li>
+          <li><span class="highlight">Same-scene contradictions:</span> contradictions inside the submitted text even when memory is empty.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Use this as the live demo plan. If the app works, follow these exact steps. If it does not, explain that these are the prototype interactions and present screenshots or describe expected warnings.">
+      <div class="frame">
+        <p class="eyebrow">Demo Flow</p>
+        <h2>A short class demo can show the full agent loop.</h2>
+        <div class="grid">
+          <div class="card">
+            <strong>1. Ingest source text</strong>
+            <p>Paste sample story material and extract candidate facts about characters, places, secrets, and rules.</p>
+          </div>
+          <div class="card">
+            <strong>2. Approve memory</strong>
+            <p>Review the editable fact table and approve only the facts that should count as story canon.</p>
+          </div>
+          <div class="card">
+            <strong>3. Check a new scene</strong>
+            <p>Paste the intentionally conflicting continuation and run the continuity review.</p>
+          </div>
+          <div class="card">
+            <strong>4. Explain warnings</strong>
+            <p>Show setting drift, identity drift, world-rule risks, relationship conflicts, or same-scene contradictions.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Mention that the implementation is intentionally lightweight. This helps demonstrate the agent loop directly without depending on a heavy framework.">
+      <div class="frame">
+        <p class="eyebrow">Implementation</p>
+        <h2>Lightweight by design.</h2>
+        <ul>
+          <li>Built with Python and Streamlit.</li>
+          <li>Only listed runtime dependency is <span class="highlight">streamlit&gt;=1.35</span>.</li>
+          <li>Provider calls use standard-library HTTP utilities.</li>
+          <li>Extraction depth supports Quick, Standard, and Deep review modes.</li>
+          <li>Local files store memory and provider settings under user control.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="This slide gives evidence that the prototype is not just conceptual. Use the test count and representative test areas.">
+      <div class="frame">
+        <p class="eyebrow">Testing</p>
+        <h2>The prototype has automated verification.</h2>
+        <div class="split">
+          <div>
+            <p class="lead"><span class="highlight">33 tests passed</span> in the most recent verification run.</p>
+          </div>
+          <div class="card">
+            <strong>Coverage areas</strong>
+            <p>Scene review workflow, empty-memory review, relationship logic, identity drift, setting drift, provider settings, fallback extraction, and coverage backfill.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="This is important for responsible AI. Make clear that external providers may receive text, and that the design reduces hallucination risk by using approval and deterministic checking.">
+      <div class="frame">
+        <p class="eyebrow">Responsible AI</p>
+        <h2>The system treats AI output as candidate evidence, not truth.</h2>
+        <div class="grid">
+          <div class="card">
+            <strong>Privacy</strong>
+            <p>External providers receive submitted text. Users can choose local Ollama or heuristic fallback for stronger privacy.</p>
+          </div>
+          <div class="card">
+            <strong>Hallucination control</strong>
+            <p>LLM facts are parsed, normalized, grounded in evidence, and approved before memory storage.</p>
+          </div>
+          <div class="card">
+            <strong>Human control</strong>
+            <p>Warnings are review prompts, not automatic edits or final judgments.</p>
+          </div>
+          <div class="card">
+            <strong>Known limits</strong>
+            <p>Extraction can miss subtle facts, cultural naming patterns, indirect reveals, or intentionally ambiguous writing.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Close by connecting back to the assignment: the project demonstrates perception, reasoning, action, memory, provider use, fallback handling, and explainable output.">
+      <div class="frame">
+        <p class="eyebrow">Conclusion</p>
+        <h2>LoreLock demonstrates a practical agentic workflow for creative writing.</h2>
+        <ul>
+          <li>It perceives story text and extracts structured continuity facts.</li>
+          <li>It retains approved memory across interactions.</li>
+          <li>It applies deterministic rules to produce explainable warnings.</li>
+          <li>Future work: SQLite memory, relationship graph view, batch chapter ingestion, stronger alias handling, and vector search.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <aside class="notes" id="notes" hidden></aside>
+
+  <footer class="footer">
+    <span id="slide-title">LoreLock: Story Continuity AI Agent</span>
+    <div class="controls" aria-label="Presentation controls">
+      <button type="button" id="prev" aria-label="Previous slide">&lt;</button>
+      <span id="counter">1 / 11</span>
+      <button type="button" id="next" aria-label="Next slide">&gt;</button>
+      <button type="button" id="toggle-notes" aria-label="Toggle notes">N</button>
+    </div>
+  </footer>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const title = document.getElementById("slide-title");
+    const notes = document.getElementById("notes");
+    const prev = document.getElementById("prev");
+    const next = document.getElementById("next");
+    const toggleNotes = document.getElementById("toggle-notes");
+    let index = 0;
+
+    function activeHeading(slide) {
+      const heading = slide.querySelector("h1, h2");
+      return heading ? heading.textContent : "LoreLock";
+    }
+
+    function render() {
+      slides.forEach((slide, slideIndex) => {
+        slide.classList.toggle("active", slideIndex === index);
+      });
+      counter.textContent = `${index + 1} / ${slides.length}`;
+      title.textContent = activeHeading(slides[index]);
+      notes.innerHTML = `<strong>Speaker note</strong><br>${slides[index].dataset.notes || ""}`;
+      window.location.hash = `slide-${index + 1}`;
+    }
+
+    function go(delta) {
+      index = Math.max(0, Math.min(slides.length - 1, index + delta));
+      render();
+    }
+
+    function setFromHash() {
+      const match = window.location.hash.match(/slide-(\d+)/);
+      if (!match) return;
+      const nextIndex = Number(match[1]) - 1;
+      if (nextIndex >= 0 && nextIndex < slides.length) {
+        index = nextIndex;
+      }
+    }
+
+    prev.addEventListener("click", () => go(-1));
+    next.addEventListener("click", () => go(1));
+    toggleNotes.addEventListener("click", () => {
+      notes.hidden = !notes.hidden;
+    });
+    window.addEventListener("keydown", event => {
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+        event.preventDefault();
+        go(1);
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        go(-1);
+      }
+      if (event.key.toLowerCase() === "n") {
+        notes.hidden = !notes.hidden;
+      }
+      if (event.key.toLowerCase() === "f") {
+        document.documentElement.requestFullscreen?.();
+      }
+    });
+    window.addEventListener("hashchange", () => {
+      setFromHash();
+      render();
+    });
+
+    setFromHash();
+    render();
+  </script>
+</body>
+</html>

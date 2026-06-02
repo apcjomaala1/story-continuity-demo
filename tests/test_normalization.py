@@ -70,3 +70,33 @@ def test_canonical_knowledge_fact_is_kept() -> None:
     assert facts[0]["type"] == "knowledge"
     assert facts[0]["predicate"] == "knows"
     assert facts[0]["object"] == "gate password"
+
+
+def test_role_fact_with_evidence_for_different_named_subject_is_rejected() -> None:
+    raw = [
+        {
+            "type": "status",
+            "subject": "Liora Vale",
+            "predicate": "role",
+            "value": "blade-veil candidate",
+            "evidence": "Seraphine Ardent was the blade-veil candidate.",
+            "confidence": 0.8,
+        }
+    ]
+
+    assert normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash") == []
+
+
+def test_person_status_fact_without_subject_or_person_reference_in_evidence_is_rejected() -> None:
+    raw = [
+        {
+            "type": "status",
+            "subject": "Liora Vale",
+            "predicate": "affiliation",
+            "value": "Veyrfall Academy",
+            "evidence": "At Veyrfall Academy, the first bell of autumn did not ring.",
+            "confidence": 0.8,
+        }
+    ]
+
+    assert normalize_facts(raw, metadata(), extraction_source="gemini:gemini-3.5-flash") == []
